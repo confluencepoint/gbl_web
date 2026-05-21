@@ -7,7 +7,7 @@
 <meta http-equiv="Permissions-Policy" content="geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=()">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-Zyd6aNcQwDhT0sMO9LshAmNOO/hmoQrlgpjavOWs6Ho=';
+  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-BIbJwFzs15iawf58j32Q+nNdYs0U3C5Mb/frrmLIXHc=';
   style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
   img-src 'self' data: blob: https: http:;
   font-src 'self';
@@ -18,7 +18,7 @@
   form-action 'none';
   object-src 'none';
 ">
-<title>GeoBasis Loader Web</title>
+<title>GeoBasis_Viewer (GBV)</title>
 
 <!--
   ──────────────────────────────────────────────────────────────────────────
@@ -526,6 +526,44 @@ button { cursor: pointer; }
   padding: var(--sp-4); text-align: center; color: var(--fg-muted); font-size: 12px;
 }
 
+/* Pinned base-layer entry: always last in the active list, no grip / no
+   remove, but vis-toggle + opacity slider so the user can fade it like any
+   other theme. Two-row layout so the slider has horizontal space. */
+.active-item.base-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  cursor: default;
+  border-top: 1px solid var(--border-strong);
+  margin-top: 4px;
+  padding-top: 6px;
+}
+.active-item.base-item:hover { background: transparent; }
+.active-item.base-item .head-row {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 26px;
+}
+.active-item.base-item .name { font-size: 12px; flex: 1; }
+.active-item.base-item .opacity-row {
+  display: flex; align-items: center; gap: 6px;
+  padding-left: 30px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.active-item.base-item .opacity-row input[type=range] {
+  flex: 1; accent-color: var(--accent); min-width: 0;
+}
+.active-item.base-item .opacity-row .op-val {
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+.active-item.base-item.hidden-layer .name {
+  color: var(--fg-soft); text-decoration: line-through;
+}
+.active-item.base-item.hidden-layer .vis { color: var(--fg-soft); }
+
 /* ── Map ───────────────────────────────────────────────────────────────── */
 #map-wrap {
   grid-area: map;
@@ -781,12 +819,12 @@ label.field input:focus {
     <button class="icon-btn" id="sidebar-toggle" aria-label="Sidebar umschalten" title="Sidebar">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6h18M3 12h18M3 18h18" stroke-linecap="round"/></svg>
     </button>
-    <div class="brand" aria-label="GeoBasis Loader">
+    <div class="brand" aria-label="GeoBasis_Viewer (GBV)">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8">
         <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke-linejoin="round"/>
         <path d="M3 7l9 5 9-5M12 12v10" stroke-linejoin="round"/>
       </svg>
-      <span>GeoBasis Loader</span>
+      <span>GeoBasis_Viewer (GBV)</span>
     </div>
     <span class="spacer"></span>
 
@@ -1192,6 +1230,40 @@ function installTokenTileLoader(source, serviceUrl) {
   });
 }
 
+// Image loader for single-image WMS (ImageWMS). Same auth path as
+// installTokenTileLoader but speaks the ol.Image API: source uses
+// setImageLoadFunction, the wrapper exposes getImage() returning the
+// HTMLImageElement. Without a token it short-circuits to native src.
+// On auth/transport failure we set a 1×1 transparent GIF so the canvas
+// stays clean instead of showing a broken-image glyph.
+function installTokenImageLoader(source, serviceUrl) {
+  const TRANSPARENT = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+  source.setImageLoadFunction(async (image, src) => {
+    const img = image.getImage();
+    const token = TokenStore.get(serviceUrl);
+    if (!token) { img.src = src; return; }
+    try {
+      const r = await fetch(src, {
+        headers: { "Authorization": "Bearer " + token },
+        mode: "cors",
+        credentials: "omit"
+      });
+      if (r.status === 401 || r.status === 403) {
+        requestAuthOnce(source, serviceUrl);
+        img.src = TRANSPARENT; return;
+      }
+      if (!r.ok) { img.src = TRANSPARENT; return; }
+      const blob = await r.blob();
+      const u = URL.createObjectURL(blob);
+      img.onload = () => URL.revokeObjectURL(u);
+      img.onerror = () => URL.revokeObjectURL(u);
+      img.src = u;
+    } catch {
+      img.src = TRANSPARENT;
+    }
+  });
+}
+
 // VectorTile loader: tile.setLoader(fn) is the API surface. We fetch the
 // MVT body ourselves, decode through the source's MVT format, and hand the
 // features back. Authorization is injected when a token is registered.
@@ -1268,6 +1340,11 @@ const Catalogs = {
 ───────────────────────────────────────────────────────────────────────── */
 const SourceFactory = {
   async buildWMS(layerDef) {
+    // ImageWMS (single GetMap per view) instead of TileWMS: WMS layers
+    // routinely carry labels, and tiled rendering truncates label text at
+    // tile borders. Trade-off: one request per pan/zoom instead of cached
+    // tiles, but the catalogue has no per-layer "has labels?" flag, so we
+    // pay this for all WMS layers rather than ship cut labels.
     const p = parseUri(layerDef.uri);
     let url = p.url;
     if (!isSafeUrl(url)) throw new Error("Unsichere URL");
@@ -1278,13 +1355,14 @@ const SourceFactory = {
       TRANSPARENT: true
     };
     if (p.styles) params.STYLES = p.styles;
-    const source = new ol.source.TileWMS({
+    const source = new ol.source.ImageWMS({
       url, params,
       crossOrigin: "anonymous",
-      attributions: hostOf(url)
+      attributions: hostOf(url),
+      ratio: 1.5
     });
-    installTokenTileLoader(source, url);
-    const layer = new ol.layer.Tile({ source });
+    installTokenImageLoader(source, url);
+    const layer = new ol.layer.Image({ source });
     layer.set("_serviceUrl", url);
     layer.set("_type", "ogc_wms");
     layer.set("_layers", p.layers);
@@ -1654,6 +1732,8 @@ const baseLayer = new ol.layer.Tile({
   source: new ol.source.OSM({ crossOrigin: "anonymous" })
 });
 baseLayer.set("_isBase", true);
+// Start at 30 % so the catalogue themes layered on top stay legible.
+baseLayer.setOpacity(0.3);
 
 const map = new ol.Map({
   target: "map",
@@ -1661,6 +1741,33 @@ const map = new ol.Map({
   view,
   controls: ol.control.defaults.defaults({ attributionOptions: { collapsible: true } })
 });
+
+/* Base layer is special: always present, never removable, but the user
+   wants to fade or hide it like any other theme. BaseLayer wraps the
+   visible/opacity state, fans changes out to the UI, and pushes them
+   into the permalink so a reload keeps the user's choice. Not part of
+   ActiveLayers.items because it has no catalogue id and shouldn't appear
+   in the tree. */
+const BaseLayer = {
+  layer: baseLayer,
+  name: "Hintergrundkarte (OSM)",
+  getOpacity() { return baseLayer.getOpacity(); },
+  setOpacity(v) {
+    const c = Math.max(0, Math.min(1, Number(v) || 0));
+    if (baseLayer.getOpacity() === c) return;
+    baseLayer.setOpacity(c);
+    UI.syncBaseLayerUI();
+    Permalink.scheduleUpdate();
+  },
+  isVisible() { return baseLayer.getVisible(); },
+  setVisible(v) {
+    const want = !!v;
+    if (baseLayer.getVisible() === want) return;
+    baseLayer.setVisible(want);
+    UI.syncBaseLayerUI();
+    Permalink.scheduleUpdate();
+  }
+};
 
 /* ─────────────────────────────────────────────────────────────────────────
    Module: active layers state
@@ -1806,6 +1913,10 @@ function attachStatusTracking(layer) {
     src.on("tileloadstart", () => setStatus("loading"));
     src.on("tileloadend",   () => setStatus("ok"));
     src.on("tileloaderror", () => setStatus("error"));
+  } else if (src instanceof ol.source.Image) {
+    src.on("imageloadstart", () => setStatus("loading"));
+    src.on("imageloadend",   () => setStatus("ok"));
+    src.on("imageloaderror", () => setStatus("error"));
   } else if (src instanceof ol.source.Vector) {
     src.on("featuresloadstart", () => setStatus("loading"));
     src.on("featuresloadend",   () => setStatus("ok"));
@@ -1861,6 +1972,10 @@ const UI = {
       }
       ActiveLayers.clear();
       this.renderTree();
+      // Ensure the active pane (incl. pinned base-layer row) renders even
+      // when no themes are restored from the permalink. Otherwise the base
+      // controls only appear after the first theme is activated.
+      this.renderActive();
       const sel = document.getElementById("catalog-select");
       if (sel.value !== name) sel.value = name;
 
@@ -2236,18 +2351,57 @@ const UI = {
     const root = document.getElementById("active-list");
     const pane = document.getElementById("active-pane");
     root.innerHTML = "";
-    const empty = ActiveLayers.items.length === 0;
-    pane.classList.toggle("empty", empty);
-    if (empty) {
-      const li = document.createElement("li");
-      li.className = "active-empty";
-      li.textContent = "Keine aktiven Layer.";
-      root.appendChild(li);
-      return;
-    }
+    // Base layer is always rendered, so the pane is never structurally empty.
+    pane.classList.remove("empty");
     for (const item of ActiveLayers.items) {
       root.appendChild(this._renderActiveItem(item));
     }
+    root.appendChild(this._renderBaseActiveItem());
+  },
+
+  _renderBaseActiveItem() {
+    const li = document.createElement("li");
+    li.className = "active-item base-item";
+    li.dataset.id = "__base__";
+    li.innerHTML = `
+      <div class="head-row">
+        <button class="icon-btn vis" type="button" aria-label="Sichtbarkeit umschalten" title="Sichtbar/Unsichtbar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <span class="name"></span>
+      </div>
+      <div class="opacity-row">
+        <input type="range" min="0" max="100" step="1" aria-label="Transparenz Hintergrundkarte" title="Transparenz">
+        <span class="op-val"></span>
+      </div>
+    `;
+    li.querySelector(".name").textContent = BaseLayer.name;
+    const slider = li.querySelector("input[type=range]");
+    const val = li.querySelector(".op-val");
+    const pct = Math.round(BaseLayer.getOpacity() * 100);
+    slider.value = pct;
+    val.textContent = pct + "%";
+    if (!BaseLayer.isVisible()) li.classList.add("hidden-layer");
+    slider.addEventListener("input", () => {
+      const v = Number(slider.value);
+      val.textContent = v + "%";
+      BaseLayer.setOpacity(v / 100);
+    });
+    li.querySelector(".vis").addEventListener("click", () => {
+      BaseLayer.setVisible(!BaseLayer.isVisible());
+    });
+    return li;
+  },
+
+  syncBaseLayerUI() {
+    const li = document.querySelector('.active-item.base-item');
+    if (!li) return;
+    const slider = li.querySelector("input[type=range]");
+    const val = li.querySelector(".op-val");
+    const pct = Math.round(BaseLayer.getOpacity() * 100);
+    if (slider && slider.value !== String(pct)) slider.value = pct;
+    if (val) val.textContent = pct + "%";
+    li.classList.toggle("hidden-layer", !BaseLayer.isVisible());
   },
 
   _renderActiveItem(item) {
@@ -2652,6 +2806,11 @@ const Permalink = (() => {
         ...view.getCenter().map(n => Number(n.toFixed(2))),
         Number(view.getZoom().toFixed(2))
       ] : null,
+      // Base layer state: [opacityPct, visibleFlag].
+      b: [
+        Math.round(BaseLayer.getOpacity() * 100),
+        BaseLayer.isVisible() ? 1 : 0
+      ],
       d3: document.getElementById("app").classList.contains("mode-3d") ? 1 : 0
     };
     const encoded = encodeURIComponent(JSON.stringify(state));
@@ -2680,6 +2839,11 @@ const Permalink = (() => {
     if (s.v && Array.isArray(s.v) && s.v.length === 3) {
       view.setCenter([s.v[0], s.v[1]]);
       view.setZoom(s.v[2]);
+    }
+    if (Array.isArray(s.b) && s.b.length === 2) {
+      const pct = Number(s.b[0]);
+      if (Number.isFinite(pct)) BaseLayer.setOpacity(Math.max(0, Math.min(100, pct)) / 100);
+      BaseLayer.setVisible(s.b[1] !== 0 && s.b[1] !== false);
     }
     // Layer-tuple element 0 may be a full path (contains "/") or a legacy
     // bare key; switchCatalog handles both via findLayerByPath/-Key.
