@@ -1,0 +1,3131 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Permissions-Policy" content="geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=()">
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-Zyd6aNcQwDhT0sMO9LshAmNOO/hmoQrlgpjavOWs6Ho=';
+  style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+  img-src 'self' data: blob: https: http:;
+  font-src 'self';
+  connect-src https: http:;
+  worker-src blob:;
+  frame-ancestors 'none';
+  base-uri 'self';
+  form-action 'none';
+  object-src 'none';
+">
+<title>GeoBasis Loader Web</title>
+
+<!--
+  ──────────────────────────────────────────────────────────────────────────
+  Designstack-Entscheidung
+  ──────────────────────────────────────────────────────────────────────────
+  GEWÄHLT
+    OpenLayers 10.3.1   — Pflicht: Karten-Engine.
+    proj4js 2.12.1      — Pflicht: nationale CRS-Registrierung.
+    DOMPurify 3.2.4     — Pflicht: GetFeatureInfo-HTML sanitisieren.
+    Sortable.js 1.15.6  — Drag&Drop mit zuverlässigem Touch-Support.
+                          HTML5-DnD auf Touch unzuverlässig; Mobile-Pflicht.
+    Floating UI 1.6.13  — Popup-Positionierung. CSS Anchor Positioning
+                          noch nicht universell (Safari/Firefox).
+    ol-cesium 2.18.0    — Lazy nur bei 3D-Toggle. Cesium 1.123 dynamisch.
+
+  VERWORFEN
+    Open Props          — Eigenes Token-System via CSS Custom Properties
+                          ist kleiner und stilistisch fokussierter.
+    Auto-Animate        — ESM-only erzeugt CSP-/Bundling-Friction in
+                          single-file-Setup; CSS-Transitions reichen.
+    focus-trap          — In ~30 LOC selbst geschrieben (Modal-Fokus).
+    Lucide-CDN          — Stattdessen ausgewählte SVG-Icons inline (keine
+                          Extra-Request, keine Hydration).
+
+  CSS-FEATURES
+    light-dark(), color-mix(), OKLCH-Paletten, :has(), Container Queries,
+    natives <dialog>, text-wrap balance/pretty, scroll-behavior smooth.
+
+  PROGRESSIVE ENHANCEMENT
+    View Transitions API (Katalog-/Theme-Wechsel) hinter @supports-Guard.
+    Native CSS Anchor Positioning intentional NICHT genutzt (Floating UI).
+
+  BUDGET (gzip Schätzung)
+    Sortable.js ~13 KB  +  Floating UI ~7 KB  ≈ 20 KB Zusatz-Libraries.
+    Unter dem 70 KB-Limit.
+
+  KATALOG-REALITÄT
+    Layer-Types in github.com/geoObserver/geobasis_loader:
+      ogc_wms, ogc_wmts, ogc_wfs, ogc_wcs, ogc_api_features,
+      ogc_vectorTiles (CamelCase!), web.
+    Innerhalb von `ogc_wmts` sind ~48% der Einträge KEINE Capabilities-
+    basierten WMTS, sondern XYZ-Tile-Templates ({z}/{x}/{y}/{q}) mit
+    `type=xyz` im URI — z.B. OSM, CartoDB, ESRI-Map-Tiles, Bing.
+    buildWMTS() erkennt das per Regex und routet diese Einträge in
+    buildXYZ() (mit Quadkey-Support für {q}). Capabilities-Pfad nutzt
+    authedFetch + REST→KVP-Fallback. KEINE ArcGIS-Service-Endpunkte
+    (FeatureServer/MapServer/ImageServer) — WCS bleibt unvisualised.
+  ──────────────────────────────────────────────────────────────────────────
+-->
+
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/ol@10.3.1/ol.css"
+      integrity="sha384-Jpg1uvTciFJuHq+90Ly0/2SKRT9yS5OhbIN5FuFoFWji9fc44ok8xxO88CJi8Z5W"
+      crossorigin="anonymous">
+
+<style>
+:root {
+  color-scheme: light dark;
+
+  /* Spacing scale */
+  --sp-1: 0.25rem; --sp-2: 0.5rem; --sp-3: 0.75rem;
+  --sp-4: 1rem;    --sp-5: 1.5rem; --sp-6: 2rem;
+
+  /* Radius / shadow */
+  --r-sm: 4px; --r-md: 6px; --r-lg: 8px;
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.08);
+  --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.12);
+  --shadow-lg: 0 12px 32px oklch(0% 0 0 / 0.18);
+
+  /* Surfaces */
+  --bg:        light-dark(oklch(98.5% 0.005 250), oklch(18% 0.012 260));
+  --bg-elev:   light-dark(oklch(100% 0 0),         oklch(22% 0.013 260));
+  --bg-elev-2: light-dark(oklch(96% 0.006 250),    oklch(26% 0.014 260));
+  --bg-hover:  light-dark(oklch(94% 0.008 250),    oklch(30% 0.016 260));
+  --border:    light-dark(oklch(90% 0.01 250),     oklch(34% 0.014 260));
+  --border-strong: light-dark(oklch(82% 0.015 250),oklch(44% 0.016 260));
+
+  /* Text */
+  --fg:       light-dark(oklch(22% 0.015 260), oklch(94% 0.008 250));
+  --fg-muted: light-dark(oklch(48% 0.015 260), oklch(70% 0.014 250));
+  --fg-soft:  light-dark(oklch(62% 0.013 260), oklch(58% 0.014 250));
+
+  /* Accent */
+  --accent:        oklch(62% 0.16 245);
+  --accent-hover:  oklch(56% 0.18 245);
+  --accent-soft:   color-mix(in oklch, var(--accent) 14%, transparent);
+  --accent-fg:     oklch(99% 0 0);
+
+  /* Semantic */
+  --err:  oklch(60% 0.21 25);
+  --warn: oklch(72% 0.16 78);
+  --ok:   oklch(64% 0.16 150);
+
+  /* Layout */
+  --sidebar-w: 340px;
+  --topbar-h: 52px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --t-fast: 120ms;
+  --t-med:  180ms;
+
+  --font:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+@supports (view-transition-name: a) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation-duration: 180ms; }
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font); font-size: 14px; line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* ── App grid ──────────────────────────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: var(--topbar-h) 1fr;
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar map";
+  height: 100dvh;
+}
+
+#topbar {
+  grid-area: topbar;
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  z-index: 30;
+}
+#topbar .brand {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-weight: 600; letter-spacing: -0.01em;
+}
+#topbar .brand svg { color: var(--accent); }
+#topbar .spacer { flex: 1; }
+
+.icon-btn {
+  display: inline-grid; place-items: center;
+  width: 36px; height: 36px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  color: var(--fg);
+  transition: background var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease);
+}
+.icon-btn:hover { background: var(--bg-hover); }
+.icon-btn:active { background: var(--bg-elev-2); }
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.icon-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+}
+.icon-btn svg { width: 18px; height: 18px; stroke-width: 1.8; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: 6px 12px; min-height: 32px;
+  background: var(--bg-elev-2); color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  transition: background var(--t-fast) var(--ease);
+}
+.btn:hover { background: var(--bg-hover); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary {
+  background: var(--accent); color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.btn.primary:hover { background: var(--accent-hover); }
+
+/* ── Sidebar ───────────────────────────────────────────────────────────── */
+#sidebar {
+  grid-area: sidebar;
+  display: flex; flex-direction: column;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  z-index: 20;
+}
+#sidebar .pane {
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+#sidebar .pane h2 {
+  margin: 0 0 var(--sp-3);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--fg-muted); font-weight: 600;
+}
+#sidebar select, #sidebar input[type="search"], #sidebar input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  transition: border-color var(--t-fast) var(--ease);
+}
+#sidebar select:focus, #sidebar input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+#tree-pane { flex: 1 1 auto; overflow: auto; padding: var(--sp-2) var(--sp-2) var(--sp-4); }
+
+/* Sidebar tool toggles (Identify, …). Cursor switches to crosshair on the
+   map while a click-tool is active so users see they're in a query mode. */
+.tool-toggle {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--t-fast) var(--ease);
+}
+.tool-toggle:hover { background: var(--bg-hover); }
+.tool-toggle input[type="checkbox"] { accent-color: var(--accent); }
+#app.identify-active #map { cursor: crosshair; }
+
+/* ── Layer tree ────────────────────────────────────────────────────────── */
+.tree { list-style: none; padding: 0; margin: 0; }
+.tree ul { list-style: none; padding: 0 0 0 var(--sp-4); margin: 0; }
+
+/* Treelines: elbow connectors via pseudo-elements on each <li>.
+   - ::before draws the └─ shape from the parent column to the row centre
+   - ::after extends the vertical column past the row, except on the last
+     child (so the line stops cleanly).
+   Top-level `> li` items have no parent column → connectors only on
+   nested <ul>s. */
+.tree ul {
+  position: relative;
+  padding-left: 18px;
+}
+.tree ul > li {
+  position: relative;
+}
+.tree ul > li::before {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: 0;
+  width: 11px;
+  height: 15px;
+  border-left:   1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  border-bottom-left-radius: 6px;
+  pointer-events: none;
+}
+.tree ul > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: 15px;
+  bottom: 0;
+  border-left: 1.5px solid var(--border-strong);
+  pointer-events: none;
+}
+
+/* Separator: a visual rule appended *under* the preceding item. The old
+   implementation rendered a standalone <li.separator>, which broke the
+   tree-line column (its own ::before drew a spurious elbow). We now mark
+   the preceding <li> instead — no extra DOM node, no broken connector. */
+.tree li.separator-after {
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tree li.group > .row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-radius: var(--r-sm);
+  color: var(--fg); font-weight: 500;
+}
+.tree li.group > .row:hover { background: var(--bg-hover); }
+.tree li.group > .row .caret {
+  width: 16px; height: 16px;
+  transition: transform var(--t-fast) var(--ease);
+}
+.tree li.group[aria-expanded="false"] > .row .caret { transform: rotate(-90deg); }
+.tree li.group[aria-expanded="false"] > ul { display: none; }
+
+.tree li.layer > label {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 6px 8px; border-radius: var(--r-sm);
+  color: var(--fg);
+  min-height: 32px;
+  cursor: pointer;
+}
+.tree li.layer > label:hover { background: var(--bg-hover); }
+.tree li.layer > label input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+}
+.tree li.layer .name { flex: 1; }
+/* ─── Service tags ──────────────────────────────────────────────────────
+   Single source of truth for service-type chips. Used by:
+     • .tree li.layer .badge.svc-tag     (compact tree badge)
+     • #filter-pane .type-filter label   (filter chip with checked state)
+   Hue selected per service family; colour mix tuned for light/dark. */
+.svc-tag {
+  display: inline-flex; align-items: center;
+  font-size: 10px; line-height: 1; padding: 3px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2); color: var(--fg-soft);
+}
+/* --svc-c must NOT self-reference (`var(--svc-c, 0.14)` on --svc-c itself
+   is a "guaranteed-invalid value" per CSS spec). Set both hue and chroma
+   per type. */
+.svc-tag[data-type="ogc_wms"]            { --svc-h: 255; --svc-c: 0.14; } /* blue    */
+.svc-tag[data-type="ogc_wmts"]           { --svc-h: 200; --svc-c: 0.14; } /* cyan    */
+.svc-tag[data-type="ogc_wfs"]            { --svc-h: 145; --svc-c: 0.14; } /* green   */
+.svc-tag[data-type="ogc_api_features"]   { --svc-h: 280; --svc-c: 0.14; } /* violet  */
+.svc-tag[data-type="ogc_vectorTiles"]    { --svc-h: 325; --svc-c: 0.14; } /* magenta */
+.svc-tag[data-type="ogc_wcs"]            { --svc-h: 50;  --svc-c: 0.14; } /* amber   */
+.svc-tag[data-type="web"]                { --svc-h: 0;   --svc-c: 0;    } /* grey    */
+.svc-tag[data-type] {
+  background:   oklch(96% var(--svc-c) var(--svc-h));
+  color:        oklch(38% calc(var(--svc-c) * 1.6) var(--svc-h));
+  border-color: oklch(78% var(--svc-c) var(--svc-h));
+}
+@media (prefers-color-scheme: dark) {
+  .svc-tag[data-type] {
+    background:   oklch(28% calc(var(--svc-c) * 1.2) var(--svc-h));
+    color:        oklch(82% calc(var(--svc-c) * 1.4) var(--svc-h));
+    border-color: oklch(44% var(--svc-c) var(--svc-h));
+  }
+}
+
+.tree li.layer .badge {
+  /* Compact base; colour comes from .svc-tag (or its data-type variants).
+     Keep this rule low-specificity by avoiding background/colour overrides. */
+  font-size: 10px; padding: 1px 6px; border-radius: 999px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  font-weight: 600;
+}
+.tree li.layer.loading > label::after {
+  content: "";
+  width: 12px; height: 12px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-left: auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.tree li.layer.unsupported .name { color: var(--fg-soft); text-decoration: line-through; }
+.tree li.layer.unsafe .badge { color: var(--err); border-color: var(--err); }
+.tree li.layer.insecure .insecure-badge { color: var(--warn); border-color: var(--warn); }
+.tree li.layer .badges { display: inline-flex; gap: 4px; align-items: center; }
+
+#filter-pane .scope-toggle { display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin-bottom: var(--sp-3); }
+#filter-pane .scope-toggle input { accent-color: var(--accent); margin-right: 6px; }
+#filter-pane .scope-toggle label { cursor: pointer; }
+
+/* Type filter: same .svc-tag chips as in the tree, with a clear
+   checked/unchecked affordance. Native checkbox is visually hidden but
+   remains focusable + announced by screen readers. */
+#filter-pane .type-filter {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+#filter-pane .type-filter label.svc-tag {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  opacity: 0.4;
+  filter: saturate(0.5);
+  padding: 4px 9px;
+  transition: opacity var(--t-fast) var(--ease),
+              filter var(--t-fast) var(--ease),
+              transform var(--t-fast) var(--ease);
+}
+#filter-pane .type-filter label.svc-tag:hover { transform: translateY(-1px); }
+#filter-pane .type-filter label.svc-tag:has(input:checked) {
+  opacity: 1;
+  filter: none;
+}
+#filter-pane .type-filter label.svc-tag input {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0; pointer-events: none;
+  margin: 0;
+}
+#filter-pane .type-filter label.svc-tag:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Inline per-layer transparency control inside the tree */
+.tree .layer-controls {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 6px 36px;  /* aligned under the layer name */
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.tree li.layer.active .layer-controls { display: flex; }
+.tree .layer-controls input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  min-width: 0;
+}
+.tree .layer-controls .op-val {
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+.tree .layer-controls .icon-btn-sm {
+  display: inline-grid; place-items: center;
+  width: 24px; height: 24px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--fg-muted);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.tree .layer-controls .icon-btn-sm:hover { background: var(--bg-hover); color: var(--fg); }
+.tree .layer-controls .icon-btn-sm:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+@media (pointer: coarse) {
+  .tree .layer-controls .icon-btn-sm { width: 32px; height: 32px; }
+}
+
+.tree-empty {
+  padding: var(--sp-5) var(--sp-4); text-align: center;
+  color: var(--fg-muted); font-size: 13px;
+}
+
+/* ── Active layers panel ───────────────────────────────────────────────── */
+#active-pane {
+  border-top: 1px solid var(--border-strong);
+  background: var(--bg-elev-2);
+  display: flex; flex-direction: column;
+  max-height: 45%;
+}
+#active-list { padding: var(--sp-2); margin: 0; list-style: none; overflow: auto; flex: 1; }
+
+/* Compact mini-list: one row per layer, grip + eye + name + status + ×.
+   Heavier controls (opacity slider, zoom-to-layer) live inline in the tree. */
+.active-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: transparent;
+  border-radius: var(--r-sm);
+  cursor: grab;
+  min-height: 30px;
+}
+.active-item + .active-item { border-top: 1px solid var(--border); }
+.active-item:hover { background: var(--bg-hover); }
+.active-item.sortable-chosen { cursor: grabbing; }
+.active-item.sortable-ghost { opacity: 0.4; }
+.active-item .grip {
+  color: var(--fg-soft);
+  display: grid; place-items: center;
+  width: 14px; height: 14px;
+}
+.active-item .name {
+  font-size: 12px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  min-width: 0;
+}
+.active-item .icon-btn {
+  width: 26px; height: 26px;
+}
+.active-item .icon-btn svg { width: 14px; height: 14px; }
+.active-item.hidden-layer .name { color: var(--fg-soft); text-decoration: line-through; }
+.active-item.hidden-layer .vis { color: var(--fg-soft); }
+.active-item .status {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--fg-soft);
+}
+.active-item .status.ok { background: var(--ok); }
+.active-item .status.loading { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.active-item .status.error { background: var(--err); }
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+.active-empty {
+  padding: var(--sp-4); text-align: center; color: var(--fg-muted); font-size: 12px;
+}
+
+/* ── Map ───────────────────────────────────────────────────────────────── */
+#map-wrap {
+  grid-area: map;
+  position: relative;
+  overflow: hidden;
+}
+#map, #map3d {
+  position: absolute; inset: 0;
+}
+#map3d { display: none; background: black; }
+#app.mode-3d #map { display: none; }
+#app.mode-3d #map3d { display: block; }
+
+/* OL controls restyling. Override `display`/`line-height`/`padding` too,
+   else OL's own CSS (line-height: .4em, padding: 0, font-size: inherit)
+   leaves the + / − glyph off-centre at our 32px box size. */
+.ol-control button {
+  display: grid !important;
+  place-items: center !important;
+  background: var(--bg-elev) !important;
+  color: var(--fg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--r-md) !important;
+  width: 32px !important; height: 32px !important;
+  margin: 2px !important;
+  padding: 0 !important;
+  font-size: 16px !important;
+  line-height: 1 !important;
+  transition: background var(--t-fast) var(--ease);
+}
+.ol-control button:hover { background: var(--bg-hover) !important; }
+.ol-control button:focus-visible {
+  outline: 2px solid var(--accent) !important;
+}
+.ol-zoom { top: var(--sp-3); left: var(--sp-3); background: transparent; }
+.ol-attribution {
+  background: color-mix(in oklch, var(--bg-elev) 88%, transparent) !important;
+  color: var(--fg-muted) !important;
+  border-radius: var(--r-sm);
+  font-size: 11px;
+}
+.ol-attribution a { color: var(--fg-muted); }
+
+/* ── Identify popup ────────────────────────────────────────────────────── */
+/* `width: max-content` lets the popup shrink around small messages
+   (e.g. "Keine Informationen…") while the max-width caps it for
+   table-shaped results. A fixed width would always render at full
+   width regardless of content. */
+#popup {
+  position: absolute;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  width: max-content;
+  min-width: 220px;
+  max-width: min(420px, calc(100vw - var(--sp-4) * 2));
+  max-height: 60vh;
+  display: none;
+  flex-direction: column;
+  z-index: 50;
+}
+#popup.open { display: flex; }
+#popup .popup-head {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+#popup .tabs {
+  display: flex; gap: 2px; overflow-x: auto;
+  flex: 1; padding: 2px;
+}
+#popup .tab {
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+#popup .tab[aria-selected="true"] {
+  background: var(--accent-soft); color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+}
+#popup .body {
+  padding: var(--sp-3); overflow: auto;
+  font-size: 13px;
+}
+#popup table { width: 100%; border-collapse: collapse; }
+#popup th, #popup td {
+  text-align: left; padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  word-break: break-word;
+}
+#popup th { color: var(--fg-muted); font-weight: 500; width: 40%; }
+#popup .empty { color: var(--fg-muted); text-align: center; padding: var(--sp-4); }
+
+/* ── Dialog ────────────────────────────────────────────────────────────── */
+dialog {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  color: var(--fg);
+  padding: 0;
+  width: min(440px, calc(100vw - var(--sp-4) * 2));
+  box-shadow: var(--shadow-lg);
+}
+dialog::backdrop { background: oklch(0% 0 0 / 0.4); backdrop-filter: blur(2px); }
+dialog .head {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+dialog .body { padding: var(--sp-4); display: grid; gap: var(--sp-3); }
+dialog .actions {
+  display: flex; justify-content: flex-end; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+
+label.field { display: grid; gap: 4px; font-size: 12px; color: var(--fg-muted); }
+label.field input {
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+label.field input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ── Toast ─────────────────────────────────────────────────────────────── */
+#toasts {
+  position: fixed; bottom: var(--sp-4); left: 50%;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  z-index: 100; pointer-events: none;
+}
+.toast {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 8px 14px;
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  pointer-events: auto;
+  animation: toast-in var(--t-med) var(--ease);
+}
+.toast.err { border-color: var(--err); color: var(--err); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Mobile ────────────────────────────────────────────────────────────── */
+#sidebar-toggle, #active-handle { display: none; }
+
+@media (max-width: 767px) {
+  #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--topbar-h) 1fr;
+    grid-template-areas: "topbar" "map";
+  }
+  #sidebar {
+    position: fixed;
+    top: var(--topbar-h);
+    left: 0; bottom: 0;
+    width: min(360px, 86vw);
+    transform: translateX(-100%);
+    transition: transform var(--t-med) var(--ease);
+    box-shadow: var(--shadow-lg);
+  }
+  #app.sidebar-open #sidebar { transform: translateX(0); }
+  #app.sidebar-open::after {
+    content: "";
+    position: fixed; inset: var(--topbar-h) 0 0 0;
+    background: oklch(0% 0 0 / 0.4);
+    z-index: 15;
+  }
+  #sidebar-toggle { display: inline-grid; }
+
+  #active-pane {
+    position: fixed; left: 0; right: 0;
+    bottom: 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-top: 1px solid var(--border-strong);
+    background: var(--bg-elev);
+    transform: translateY(calc(100% - 44px));
+    transition: transform var(--t-med) var(--ease);
+    z-index: 25;
+    max-height: 70dvh;
+  }
+  #app.active-open #active-pane { transform: translateY(0); }
+  #active-handle {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 44px; cursor: pointer;
+    border: 0; border-bottom: 1px solid var(--border);
+    background: transparent;
+    font-size: 12px; color: var(--fg-muted);
+    gap: var(--sp-2);
+  }
+  #active-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  #active-handle::before {
+    content: ""; width: 36px; height: 4px;
+    background: var(--border-strong); border-radius: 999px;
+  }
+
+  /* hide active pane inside open sidebar on mobile — moved to overlay */
+  #sidebar #active-pane-slot { display: none; }
+}
+
+@media (min-width: 768px) {
+  /* Float the active-layers panel in the top-right corner so it doesn't
+     stretch full-width and cover the zoom buttons. Hide entirely when
+     there are no active layers. */
+  #active-pane {
+    position: absolute;
+    top: var(--sp-3);
+    right: var(--sp-3);
+    width: 320px;
+    max-height: calc(100% - var(--sp-3) * 2);
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    z-index: 10;
+  }
+  /* JS toggles .empty when there are no active layers — this avoids
+     depending on `:has()` and survives older browser caches. */
+  #active-pane.empty { display: none; }
+}
+
+/* Touch target sizing */
+@media (pointer: coarse) {
+  .icon-btn { width: 44px; height: 44px; }
+  .btn { min-height: 44px; }
+  .tree li.layer > label { min-height: 44px; }
+}
+</style>
+</head>
+<body>
+
+<div id="app" aria-busy="false">
+
+  <header id="topbar">
+    <button class="icon-btn" id="sidebar-toggle" aria-label="Sidebar umschalten" title="Sidebar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6h18M3 12h18M3 18h18" stroke-linecap="round"/></svg>
+    </button>
+    <div class="brand" aria-label="GeoBasis Loader">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke-linejoin="round"/>
+        <path d="M3 7l9 5 9-5M12 12v10" stroke-linejoin="round"/>
+      </svg>
+      <span>GeoBasis Loader</span>
+    </div>
+    <span class="spacer"></span>
+
+    <button class="icon-btn" id="btn-permalink" aria-label="Permalink kopieren" title="Permalink kopieren">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" stroke-linecap="round"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" stroke-linecap="round"/></svg>
+    </button>
+    <button class="icon-btn" id="btn-export" aria-label="Exportieren" title="Exportieren">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="icon-btn" id="btn-import" aria-label="Importieren" title="Importieren">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21V9m0 0 4 4m-4-4-4 4M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="icon-btn" id="btn-3d" aria-pressed="false" aria-label="3D umschalten" title="2D / 3D">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" font-family="ui-sans-serif"><text x="12" y="16" text-anchor="middle" font-size="11" fill="currentColor" stroke="none">3D</text><rect x="3" y="4" width="18" height="16" rx="2"/></svg>
+    </button>
+    <button class="icon-btn" id="btn-theme" aria-label="Theme umschalten" title="Hell / Dunkel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10Z" stroke-linejoin="round"/></svg>
+    </button>
+  </header>
+
+  <aside id="sidebar" aria-label="Layer-Auswahl">
+    <div class="pane">
+      <h2>Katalog</h2>
+      <select id="catalog-select" aria-label="Katalog auswählen"></select>
+    </div>
+    <div class="pane">
+      <h2>Suche</h2>
+      <input type="search" id="search-input" placeholder="Layer suchen…" autocomplete="off">
+    </div>
+    <div class="pane" id="filter-pane">
+      <h2>Filter</h2>
+      <div class="scope-toggle" role="radiogroup" aria-label="Suchbereich">
+        <label><input type="radio" name="scope" value="current" checked> Aktueller Katalog</label>
+        <label><input type="radio" name="scope" value="all"> Alle Kataloge</label>
+      </div>
+      <div class="type-filter" role="group" aria-label="Datentypen">
+        <label class="svc-tag" data-type="ogc_wms"><input type="checkbox" data-type="ogc_wms" checked> WMS</label>
+        <label class="svc-tag" data-type="ogc_wmts"><input type="checkbox" data-type="ogc_wmts" checked> WMTS</label>
+        <label class="svc-tag" data-type="ogc_wfs"><input type="checkbox" data-type="ogc_wfs" checked> WFS</label>
+        <label class="svc-tag" data-type="ogc_api_features"><input type="checkbox" data-type="ogc_api_features" checked> OGC API</label>
+        <label class="svc-tag" data-type="ogc_vectorTiles"><input type="checkbox" data-type="ogc_vectorTiles" checked> Vector Tiles</label>
+        <label class="svc-tag" data-type="ogc_wcs"><input type="checkbox" data-type="ogc_wcs"> WCS</label>
+        <label class="svc-tag" data-type="web"><input type="checkbox" data-type="web"> URL</label>
+      </div>
+    </div>
+    <div class="pane" id="tools-pane">
+      <h2>Werkzeuge</h2>
+      <label class="tool-toggle" title="Beim Klick in die Karte Layer-Informationen abrufen">
+        <input type="checkbox" id="identify-toggle">
+        <span>Informationsabfrage</span>
+      </label>
+    </div>
+    <div id="tree-pane">
+      <ul class="tree" id="tree" role="tree" aria-label="Themen"></ul>
+    </div>
+    <div id="active-pane-slot"></div>
+  </aside>
+
+  <section id="map-wrap">
+    <div id="map" tabindex="0" aria-label="Karte (Pfeiltasten: verschieben, +/-: zoomen)"></div>
+    <div id="map3d"></div>
+
+    <div id="active-pane" class="empty" aria-label="Aktive Layer">
+      <button id="active-handle" type="button" aria-expanded="false" aria-controls="active-list"><span>Aktive Layer</span></button>
+      <ul id="active-list" role="list"></ul>
+    </div>
+
+    <div id="popup" role="dialog" aria-label="Feature-Information">
+      <div class="popup-head">
+        <div class="tabs" role="tablist" id="popup-tabs"></div>
+        <button class="icon-btn" id="popup-close" aria-label="Schließen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="body" id="popup-body"></div>
+    </div>
+  </section>
+</div>
+
+<!-- Token dialog -->
+<dialog id="token-dialog" aria-labelledby="token-dialog-title">
+  <div class="head" id="token-dialog-title">Token erforderlich</div>
+  <form method="dialog" class="body" id="token-form">
+    <p style="margin:0;color:var(--fg-muted);font-size:13px;" id="token-dialog-desc"></p>
+    <label class="field">
+      Token
+      <input type="password" id="token-input" autocomplete="off" required>
+    </label>
+  </form>
+  <div class="actions">
+    <button class="btn" type="button" id="token-cancel">Abbrechen</button>
+    <button class="btn primary" type="button" id="token-save">Speichern</button>
+  </div>
+</dialog>
+
+<!-- Export dialog -->
+<dialog id="export-dialog" aria-labelledby="export-dialog-title">
+  <div class="head" id="export-dialog-title">Exportieren</div>
+  <div class="body">
+    <p style="margin:0;color:var(--fg-muted);font-size:13px;">Wähle ein Format. Tokens und Auth-Daten werden nie exportiert.</p>
+  </div>
+  <div class="actions">
+    <button class="btn" id="export-cancel">Abbrechen</button>
+    <button class="btn" id="export-json">Sitzung als JSON</button>
+    <button class="btn primary" id="export-png">Karte als PNG</button>
+  </div>
+</dialog>
+
+<!-- Import dialog -->
+<dialog id="import-dialog" aria-labelledby="import-dialog-title">
+  <div class="head" id="import-dialog-title">Sitzung importieren</div>
+  <div class="body">
+    <label class="field">
+      JSON-Datei
+      <input type="file" id="import-file" accept="application/json,.json">
+    </label>
+  </div>
+  <div class="actions">
+    <button class="btn" id="import-cancel">Abbrechen</button>
+  </div>
+</dialog>
+
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<!-- Vendor libs -->
+<script src="https://cdn.jsdelivr.net/npm/ol@10.3.1/dist/ol.js"
+        integrity="sha384-GtOM9G1JWFKmDbfOLBrez9YebIrX1pqVVtYukhqrKOtyneLNxnTIFMe8ER850GT/"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js"
+        integrity="sha384-eCfO4pOi+VsP6z/nsQni5JF69AVBgkaI2kwPfFh+J64UMLNVDIBVvowHHM9Q62TF"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"
+        integrity="sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"
+        integrity="sha384-HZZ/fukV+9G8gwTNjN7zQDG0Sp7MsZy5DDN6VfY3Be7V9dvQpEpR2jF2HlyFUUjU"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@floating-ui/core@1.6.9/dist/floating-ui.core.umd.min.js"
+        integrity="sha384-OzeX2nheAJ98dzprQe8DrByhUwKlPiMPCUszYj4EmNNbIc/esYM8AyyLuXeRYyzw"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@floating-ui/dom@1.6.13/dist/floating-ui.dom.umd.min.js"
+        integrity="sha384-hGme4Kf8Fh3js1nznhNEMtloY/6Qe3sOO62HJJb4tsIzArMVygXgSM0oz47JeKan"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/ol-mapbox-style@12.5.0/dist/olms.js"
+        integrity="sha384-bicdRF+KqlZL2ikBdpuuEyh9cBv/BPeoRMoN9L3gxCLMdmsZksPC45Tc42jvQ2we"
+        crossorigin="anonymous"></script>
+
+<script>
+"use strict";
+
+/* Frame buster */
+if (window.top !== window.self) {
+  document.body.textContent = "";
+  throw new Error("Framing not allowed");
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: proj4 / CRS registration
+───────────────────────────────────────────────────────────────────────── */
+(function registerProjections() {
+  const defs = {
+    "EPSG:2056":  "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 +k_0=1 +x_0=2600000 +y_0=1200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs",
+    "EPSG:21781": "+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 +k_0=1 +x_0=600000 +y_0=200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs",
+    "EPSG:25832": "+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "EPSG:25833": "+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "EPSG:31256": "+proj=tmerc +lat_0=0 +lon_0=16.33333333333333 +k=1 +x_0=0 +y_0=-5000000 +ellps=bessel +towgs84=577.326,90.129,463.919,5.137,1.474,5.297,2.4232 +units=m +no_defs",
+    "EPSG:31287": "+proj=lcc +lat_1=49 +lat_2=46 +lat_0=47.5 +lon_0=13.33333333333333 +x_0=400000 +y_0=400000 +ellps=bessel +towgs84=577.326,90.129,463.919,5.137,1.474,5.297,2.4232 +units=m +no_defs",
+    "EPSG:4258":  "+proj=longlat +ellps=GRS80 +no_defs",
+    "EPSG:5514":  "+proj=krovak +lat_0=49.5 +lon_0=24.83333333333333 +alpha=30.28813972222222 +k=0.9999 +x_0=0 +y_0=0 +ellps=bessel +towgs84=589,76,480,0,0,0,0 +units=m +no_defs"
+  };
+  for (const [code, def] of Object.entries(defs)) proj4.defs(code, def);
+  ol.proj.proj4.register(proj4);
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: toast helper
+───────────────────────────────────────────────────────────────────────── */
+const Toast = (() => {
+  const root = document.getElementById("toasts");
+  function show(msg, kind) {
+    const el = document.createElement("div");
+    el.className = "toast" + (kind === "err" ? " err" : "");
+    el.textContent = msg;
+    root.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+  return { info: m => show(m, ""), err: m => show(m, "err") };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: URI parser + URL validator
+───────────────────────────────────────────────────────────────────────── */
+function parseUri(uri) {
+  // QGIS provider strings come in two flavours:
+  //   A) WMS / WMTS:                 "k1=v1&k2=v2&...&url=https://..."
+  //   B) WFS / OGC API Features:     "k1='v1' k2='v2' ... url='https://...'"
+  // Quoted keys may contain dashes/colons (`http-header:referer`). Decoding
+  // is per-field with try/catch so a malformed value can't crash the parser
+  // and abort the tree render — bad fields just stay as the raw substring.
+  const out = {};
+  if (typeof uri !== "string") return out;
+  const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+
+  const quoted = [...uri.matchAll(/([\w:.\-]+)\s*=\s*'([^']*)'/g)];
+  if (quoted.length > 0) {
+    for (const m of quoted) out[m[1]] = m[2];
+    return out;
+  }
+
+  for (const part of uri.split("&")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) { out[safeDecode(part)] = ""; continue; }
+    const k = safeDecode(part.slice(0, eq));
+    const v = safeDecode(part.slice(eq + 1));
+    out[k] = v;
+  }
+  return out;
+}
+
+function isSafeUrl(s) {
+  // Accept http: and https:. Reject javascript:/data:/file:/blob: etc.
+  // Additionally block private/loopback/link-local hosts (SSRF defence
+  // against a compromised catalogue pointing at the user's intranet).
+  if (typeof s !== "string") return false;
+  let u;
+  try { u = new URL(s); } catch { return false; }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+  return !isBlockedHost(u.hostname);
+}
+
+function isBlockedHost(host) {
+  if (!host) return true;
+  const h = host.toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  if (h === "0.0.0.0" || h === "[::]" || h === "::" || h === "[::1]" || h === "::1") return true;
+
+  // IPv4 dotted-quad?
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const oct = m.slice(1).map(n => parseInt(n, 10));
+    if (oct.some(n => n < 0 || n > 255)) return true;
+    const [a, b] = oct;
+    if (a === 10) return true;                          // 10.0.0.0/8
+    if (a === 127) return true;                         // loopback
+    if (a === 169 && b === 254) return true;            // link-local
+    if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12
+    if (a === 192 && b === 168) return true;            // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true;  // CGNAT 100.64.0.0/10
+    if (a === 0) return true;                           // "this network"
+    if (a >= 224) return true;                          // multicast/reserved
+  }
+
+  // IPv6 bracketed
+  if (h.startsWith("[") && h.endsWith("]")) {
+    const v6 = h.slice(1, -1);
+    if (v6 === "0:0:0:0:0:0:0:1") return true;           // expanded loopback
+    const mapped = v6.match(/^(?:::ffff:|0:0:0:0:0:ffff:)(.+)$/);
+    if (mapped) {
+      const tail = mapped[1];
+      if (tail.includes(".")) return isBlockedHost(tail);
+      const parts = tail.split(":");
+      if (parts.length === 2) {
+        const hi = parseInt(parts[0], 16);
+        const lo = parseInt(parts[1], 16);
+        if (Number.isFinite(hi) && Number.isFinite(lo)) {
+          return isBlockedHost([
+            (hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255
+          ].join("."));
+        }
+      }
+      return true;
+    }
+    if (v6.startsWith("fc") || v6.startsWith("fd")) return true;  // ULA
+    if (v6.startsWith("fe80:")) return true;                       // link-local
+  }
+  return false;
+}
+function isHttps(s) {
+  try { return new URL(s).protocol === "https:"; } catch { return false; }
+}
+
+// Cache key is the *full* https URL (no query, no template tokens) so a
+// host whose homepage answers TLS but whose service is HTTP-only does not
+// false-positive.
+const _httpsProbeCache = new Map();
+
+async function maybeUpgradeToHttps(url) {
+  if (!url || !url.startsWith("http://")) return url;
+  const httpsUrl = "https://" + url.slice(7);
+
+  // Probe URL: same host+path, but strip query and replace any tile-template
+  // tokens so the probe targets something real ({z}/{x}/{y}/{q} → 0).
+  let probe;
+  try {
+    const u = new URL(httpsUrl);
+    u.search = "";
+    u.hash = "";
+    u.pathname = u.pathname.replace(/\{[zxyq]\}/g, "0");
+    probe = u.toString();
+  } catch { return url; }
+
+  if (!_httpsProbeCache.has(probe)) {
+    _httpsProbeCache.set(probe, (async () => {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        // no-cors: any response (incl. 4xx, redirects) counts as "TLS reachable".
+        // Network/TLS errors throw → upgrade declined.
+        await fetch(probe, { method: "HEAD", mode: "no-cors", signal: ctrl.signal });
+        clearTimeout(t);
+        return true;
+      } catch {
+        return false;
+      }
+    })());
+  }
+  const ok = await _httpsProbeCache.get(probe);
+  return ok ? httpsUrl : url;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: token store (in-memory only)
+───────────────────────────────────────────────────────────────────────── */
+const TokenStore = (() => {
+  const tokens = new Map();
+  const key = url => { try { return new URL(url).origin; } catch { return url; } };
+  return {
+    get: url => tokens.get(key(url)),
+    set: (url, t) => tokens.set(key(url), t),
+    clear: url => tokens.delete(key(url))
+  };
+})();
+
+function appendToken(url, token) {
+  if (!token) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return url + sep + "token=" + encodeURIComponent(token);
+}
+
+// Fetch wrapper that injects Bearer auth when a token is registered
+// for the given service URL. Used by Identify/WFS/OAPIF code paths.
+async function authedFetch(serviceUrl, requestUrl, opts = {}) {
+  const token = TokenStore.get(serviceUrl);
+  if (!token) return fetch(requestUrl, opts);
+  const headers = new Headers(opts.headers || {});
+  headers.set("Authorization", "Bearer " + token);
+  return fetch(requestUrl, { ...opts, headers, credentials: "omit" });
+}
+
+// Signals a 401/403 from a build-time fetch (e.g. WMTS Capabilities). The
+// caller catches this, shows the token dialog, and on save re-runs the build.
+class AuthRequiredError extends Error {
+  constructor(serviceUrl, message) {
+    super(message || "Authentifizierung erforderlich");
+    this.name = "AuthRequiredError";
+    this.serviceUrl = serviceUrl;
+  }
+}
+
+// OL's TileState.ERROR === 3 — cache to avoid the magic literal at call sites.
+const TILE_ERROR = (window.ol && ol.TileState) ? ol.TileState.ERROR : 3;
+
+// Open the token dialog at most once per source until the user enters a
+// token: otherwise N concurrent failing tiles stack N dialog re-opens and
+// the last save() callback overwrites the previous retry function.
+function requestAuthOnce(source, serviceUrl) {
+  if (source.get("_authRequested")) return;
+  source.set("_authRequested", true);
+  TokenDialog.open(serviceUrl, "", () => {
+    source.set("_authRequested", false);
+    if (typeof source.refresh === "function") source.refresh();
+  });
+}
+
+// Tile loader for raster tiles (WMS / WMTS / XYZ). Swaps Image.src for
+// a fetched blob URL so we can inject an Authorization header. Without
+// a token it short-circuits back to the native Image.src path. Do NOT
+// install this on VectorTile sources — they have no .getImage().
+function installTokenTileLoader(source, serviceUrl) {
+  source.setTileLoadFunction(async (tile, src) => {
+    const img = tile.getImage();
+    const token = TokenStore.get(serviceUrl);
+    if (!token) { img.src = src; return; }
+    try {
+      const r = await fetch(src, {
+        headers: { "Authorization": "Bearer " + token },
+        mode: "cors",
+        credentials: "omit"
+      });
+      if (r.status === 401 || r.status === 403) {
+        requestAuthOnce(source, serviceUrl);
+        tile.setState(TILE_ERROR); return;
+      }
+      if (!r.ok) { tile.setState(TILE_ERROR); return; }
+      const blob = await r.blob();
+      const u = URL.createObjectURL(blob);
+      img.onload = () => URL.revokeObjectURL(u);
+      img.onerror = () => URL.revokeObjectURL(u);
+      img.src = u;
+    } catch {
+      tile.setState(TILE_ERROR);
+    }
+  });
+}
+
+// VectorTile loader: tile.setLoader(fn) is the API surface. We fetch the
+// MVT body ourselves, decode through the source's MVT format, and hand the
+// features back. Authorization is injected when a token is registered.
+function installVectorTileTokenLoader(source, serviceUrl) {
+  source.setTileLoadFunction((tile, src) => {
+    tile.setLoader(async (extent, resolution, projection) => {
+      const token = TokenStore.get(serviceUrl);
+      const init = { credentials: "omit" };
+      if (token) init.headers = { "Authorization": "Bearer " + token };
+      try {
+        const r = await fetch(src, init);
+        if (r.status === 401 || r.status === 403) {
+          requestAuthOnce(source, serviceUrl);
+          tile.setState(TILE_ERROR); return;
+        }
+        if (!r.ok) { tile.setState(TILE_ERROR); return; }
+        const buf = await r.arrayBuffer();
+        const feats = source.getFormat().readFeatures(buf, {
+          extent, featureProjection: projection
+        });
+        tile.setFeatures(feats);
+      } catch { tile.setState(TILE_ERROR); }
+    });
+  });
+}
+
+// Strict sanitiser for untrusted GetFeatureInfo HTML responses. Allows
+// only inline-content tags and tables, blocks form/style/script/iframe/object,
+// and restricts URI-bearing attributes to http(s) targets.
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: [
+    "a", "b", "br", "code", "div", "em", "hr", "i", "li", "ol", "p", "pre",
+    "small", "span", "strong", "sub", "sup", "table", "tbody", "td", "tfoot",
+    "th", "thead", "tr", "ul"
+  ],
+  ALLOWED_ATTR: ["href", "title", "colspan", "rowspan"],
+  FORBID_TAGS: ["form", "input", "button", "style", "iframe", "object",
+                "embed", "script", "link", "meta", "img"],
+  ALLOWED_URI_REGEXP: /^https?:\/\//i,
+  ALLOW_DATA_ATTR: false,
+  RETURN_TRUSTED_TYPE: false
+};
+function safeHtml(raw) {
+  return DOMPurify.sanitize(raw, SANITIZE_CONFIG);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: catalog loader
+───────────────────────────────────────────────────────────────────────── */
+const CATALOG_BASE = "https://raw.githubusercontent.com/geoObserver/geobasis_loader/main/kataloge/";
+const CATALOG_INDEX = CATALOG_BASE + "GeoBasis_Loader_v6_Kataloge.json";
+
+const Catalogs = {
+  index: [],
+  cache: new Map(),
+  async loadIndex() {
+    const r = await fetch(CATALOG_INDEX, { cache: "force-cache" });
+    if (!r.ok) throw new Error("Katalog-Index nicht erreichbar");
+    this.index = await r.json();
+    return this.index;
+  },
+  async loadCatalog(name) {
+    if (this.cache.has(name)) return this.cache.get(name);
+    const r = await fetch(CATALOG_BASE + name + ".json", { cache: "force-cache" });
+    if (!r.ok) throw new Error("Katalog " + name + " nicht erreichbar");
+    const data = await r.json();
+    this.cache.set(name, data);
+    return data;
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: source factories
+───────────────────────────────────────────────────────────────────────── */
+const SourceFactory = {
+  async buildWMS(layerDef) {
+    const p = parseUri(layerDef.uri);
+    let url = p.url;
+    if (!isSafeUrl(url)) throw new Error("Unsichere URL");
+    url = await maybeUpgradeToHttps(url);
+    const params = {
+      LAYERS: p.layers,
+      FORMAT: p.format || "image/png",
+      TRANSPARENT: true
+    };
+    if (p.styles) params.STYLES = p.styles;
+    const source = new ol.source.TileWMS({
+      url, params,
+      crossOrigin: "anonymous",
+      attributions: hostOf(url)
+    });
+    installTokenTileLoader(source, url);
+    const layer = new ol.layer.Tile({ source });
+    layer.set("_serviceUrl", url);
+    layer.set("_type", "ogc_wms");
+    layer.set("_layers", p.layers);
+    return layer;
+  },
+
+  async buildWMTS(layerDef) {
+    const p = parseUri(layerDef.uri);
+    const rawUrl = p.url;
+    if (!isSafeUrl(rawUrl)) throw new Error("Unsichere URL");
+
+    // Many catalogue entries declare `ogc_wmts` but actually carry an XYZ
+    // tile template ({z}/{x}/{y} or Bing quadkey {q}). Capabilities-parse
+    // would 404 / yield garbage — route those into the XYZ pathway.
+    const isTemplate = p.type === "xyz" || /\{[zxyq]\}/.test(rawUrl);
+    if (isTemplate) return SourceFactory.buildXYZ(layerDef);
+
+    const url = await maybeUpgradeToHttps(rawUrl);
+    // authedFetch so token-protected Capabilities load at all. The tile
+    // loader's Bearer header only fires after the source is built, so
+    // without this the dialog never appears for protected services.
+    const resp = await authedFetch(url, url);
+    if (resp.status === 401 || resp.status === 403) throw new AuthRequiredError(url);
+    if (!resp.ok) throw new Error("WMTS Capabilities " + resp.status);
+    const txt = await resp.text();
+    const caps = new ol.format.WMTSCapabilities().read(txt);
+
+    // REST is the common case in this catalogue, but KVP-only servers
+    // exist; let optionsFromCapabilities pick by trying REST → KVP →
+    // whatever the document advertises. Log encoding mismatches so a
+    // real bug in optionsFromCapabilities isn't silently swallowed.
+    let opts = null;
+    for (const enc of ["REST", "KVP", undefined]) {
+      const probe = { layer: p.layers, matrixSet: p.tileMatrixSet };
+      if (enc) probe.requestEncoding = enc;
+      try { opts = ol.source.WMTS.optionsFromCapabilities(caps, probe); }
+      catch (e) {
+        console.warn("WMTS optionsFromCapabilities", enc || "(default)", "→", e.message);
+        opts = null;
+      }
+      if (opts) break;
+    }
+    if (!opts) throw new Error("WMTS Layer nicht in Capabilities");
+    opts.crossOrigin = "anonymous";
+    opts.attributions = hostOf(url);
+    const source = new ol.source.WMTS(opts);
+    installTokenTileLoader(source, url);
+    const layer = new ol.layer.Tile({ source });
+    layer.set("_serviceUrl", url);
+    layer.set("_type", "ogc_wmts");
+    layer.set("_layers", p.layers);
+    return layer;
+  },
+
+  async buildXYZ(layerDef) {
+    const p = parseUri(layerDef.uri);
+    let url = p.url;
+    if (!isSafeUrl(url)) throw new Error("Unsichere URL");
+    url = await maybeUpgradeToHttps(url);
+
+    const hasQuad = /\{q\}/.test(url);
+    const baseOpts = {
+      crossOrigin: "anonymous",
+      attributions: hostOf(url),
+      maxZoom: Number(p.zmax) || 22,
+      minZoom: Number(p.zmin) || 0
+    };
+    const source = hasQuad
+      ? new ol.source.XYZ({
+          ...baseOpts,
+          tileUrlFunction: ([z, x, y]) => url.replace(/\{q\}/g, tileXYZToQuadKey(x, y, z))
+        })
+      : new ol.source.XYZ({ ...baseOpts, url });
+
+    installTokenTileLoader(source, url);
+    const layer = new ol.layer.Tile({ source });
+    layer.set("_serviceUrl", url);
+    layer.set("_type", "ogc_wmts");
+    return layer;
+  },
+
+  async buildWFS(layerDef) {
+    const p = parseUri(layerDef.uri);
+    let url = p.url;
+    if (!isSafeUrl(url)) throw new Error("Unsichere URL");
+    url = await maybeUpgradeToHttps(url);
+    const typename = p.typename || p.TYPENAME || p.typenames || p.layers;
+    const source = new ol.source.Vector({
+      format: new ol.format.GeoJSON(),
+      strategy: ol.loadingstrategy.bbox,
+      attributions: hostOf(url),
+      loader: async function (extent, resolution, projection, success, failure) {
+        const u = new URL(url);
+        u.searchParams.set("service", "WFS");
+        u.searchParams.set("version", "2.0.0");
+        u.searchParams.set("request", "GetFeature");
+        u.searchParams.set("typenames", typename);
+        u.searchParams.set("outputFormat", "application/json");
+        u.searchParams.set("srsname", "EPSG:3857");
+        u.searchParams.set("bbox", extent.join(",") + ",EPSG:3857");
+        u.searchParams.set("count", "500");
+        try {
+          const r = await authedFetch(url, u.toString());
+          if (r.status === 401 || r.status === 403) {
+            TokenDialog.open(url, "");
+            failure && failure(); return;
+          }
+          if (!r.ok) { failure && failure(); return; }
+          const data = await r.json();
+          const feats = source.getFormat().readFeatures(data, { featureProjection: projection });
+          source.addFeatures(feats);
+          success && success(feats);
+        } catch { failure && failure(); }
+      }
+    });
+    const layer = new ol.layer.Vector({ source, style: defaultVectorStyle() });
+    layer.set("_serviceUrl", url);
+    layer.set("_type", "ogc_wfs");
+    return layer;
+  },
+
+  async buildVectorTiles(layerDef) {
+    const p = parseUri(layerDef.uri);
+    let url = p.url;
+    if (!isSafeUrl(url)) throw new Error("Unsichere URL");
+    url = await maybeUpgradeToHttps(url);
+    let styleUrl = p.styleUrl;
+    if (styleUrl && isSafeUrl(styleUrl)) styleUrl = await maybeUpgradeToHttps(styleUrl);
+    const source = new ol.source.VectorTile({
+      format: new ol.format.MVT(),
+      url,
+      attributions: hostOf(url),
+      maxZoom: Number(p.zmax) || 22
+    });
+    installVectorTileTokenLoader(source, url);
+    const layer = new ol.layer.VectorTile({ source, declutter: true });
+    layer.set("_serviceUrl", url);
+    layer.set("_type", "ogc_vectorTiles");
+    layer.setStyle(defaultVectorStyle());
+    if (styleUrl && isSafeUrl(styleUrl) && window.olms && typeof window.olms.applyStyle === "function") {
+      window.olms.applyStyle(layer, styleUrl).catch(err => {
+        Toast.err("Style konnte nicht angewendet werden: " + err.message);
+      });
+    }
+    return layer;
+  },
+
+  async buildOgcApiFeatures(layerDef) {
+    const p = parseUri(layerDef.uri);
+    let url = p.url;
+    if (!isSafeUrl(url)) throw new Error("Unsichere URL");
+    url = await maybeUpgradeToHttps(url);
+    const source = new ol.source.Vector({
+      format: new ol.format.GeoJSON(),
+      strategy: ol.loadingstrategy.bbox,
+      attributions: hostOf(url),
+      loader: async function (extent, resolution, projection, success, failure) {
+        const u = new URL(url);
+        if (!u.pathname.endsWith("/items")) {
+          u.pathname = u.pathname.replace(/\/?$/, "/items");
+        }
+        const bbox4326 = ol.proj.transformExtent(extent, "EPSG:3857", "EPSG:4326");
+        u.searchParams.set("bbox", bbox4326.join(","));
+        u.searchParams.set("f", "json");
+        u.searchParams.set("limit", "500");
+        try {
+          const r = await authedFetch(url, u.toString());
+          if (r.status === 401 || r.status === 403) {
+            TokenDialog.open(url, "");
+            failure && failure(); return;
+          }
+          if (!r.ok) { failure && failure(); return; }
+          const data = await r.json();
+          const feats = source.getFormat().readFeatures(data, { featureProjection: projection });
+          source.addFeatures(feats);
+          success && success(feats);
+        } catch { failure && failure(); }
+      }
+    });
+    const layer = new ol.layer.Vector({ source, style: defaultVectorStyle() });
+    layer.set("_serviceUrl", url);
+    layer.set("_type", "ogc_api_features");
+    return layer;
+  }
+};
+
+/* Layer-extent resolvers per type. Returns extent in EPSG:3857 or null. */
+const _extentCache = new Map(); // item.id -> extent
+
+async function getLayerExtent(item) {
+  if (_extentCache.has(item.id)) return _extentCache.get(item.id);
+  const type = item.def.type;
+  const layer = item.layer;
+  const serviceUrl = layer.get("_serviceUrl");
+  let extent = null;
+  try {
+    if (type === "ogc_wmts") {
+      extent = layer.getExtent() || layer.getSource().getTileGrid()?.getExtent() || null;
+    } else if (type === "ogc_wms") {
+      extent = await _getWmsExtent(serviceUrl, layer.get("_layers"));
+    } else if (type === "ogc_wfs") {
+      const p = parseUri(item.def.uri);
+      const tn = p.typename || p.TYPENAME || p.typenames || p.layers;
+      extent = await _getWfsExtent(serviceUrl, tn);
+    } else if (type === "ogc_api_features") {
+      extent = await _getOapifExtent(serviceUrl);
+    } else if (type === "ogc_vectorTiles") {
+      const p = parseUri(item.def.uri);
+      if (p.styleUrl && isSafeUrl(p.styleUrl)) extent = await _getVtExtentFromStyle(p.styleUrl);
+    }
+  } catch { extent = null; }
+  if (extent && extent.every(Number.isFinite)) {
+    _extentCache.set(item.id, extent);
+    return extent;
+  }
+  return null;
+}
+
+function _flattenWmsLayers(arr, acc = []) {
+  for (const l of arr) {
+    acc.push(l);
+    if (l.Layer) _flattenWmsLayers(l.Layer, acc);
+  }
+  return acc;
+}
+
+async function _getWmsExtent(serviceUrl, layerName) {
+  const u = new URL(serviceUrl);
+  u.searchParams.set("SERVICE", "WMS");
+  u.searchParams.set("REQUEST", "GetCapabilities");
+  const r = await authedFetch(serviceUrl, u.toString());
+  if (!r.ok) return null;
+  const txt = await r.text();
+  const caps = new ol.format.WMSCapabilities().read(txt);
+  const layers = caps?.Capability?.Layer ? _flattenWmsLayers([caps.Capability.Layer]) : [];
+
+  // LAYERS may be a comma-separated list — union all individual extents.
+  const names = String(layerName || "").split(",").map(s => s.trim()).filter(Boolean);
+  let merged = null;
+  for (const name of names) {
+    const wanted = layers.find(l => l.Name === name);
+    if (!wanted) continue;
+    let ext = null;
+    if (wanted.EX_GeographicBoundingBox) {
+      ext = ol.proj.transformExtent(wanted.EX_GeographicBoundingBox, "EPSG:4326", "EPSG:3857");
+    } else if (Array.isArray(wanted.BoundingBox) && wanted.BoundingBox.length) {
+      const bb = wanted.BoundingBox.find(b => b.crs === "EPSG:3857") || wanted.BoundingBox[0];
+      ext = bb.crs === "EPSG:3857"
+        ? bb.extent
+        : ol.proj.transformExtent(bb.extent, bb.crs, "EPSG:3857");
+    }
+    if (ext && ext.every(Number.isFinite)) {
+      merged = merged ? ol.extent.extend(merged, ext) : ext.slice();
+    }
+  }
+  return merged;
+}
+
+async function _getWfsExtent(serviceUrl, typename) {
+  const u = new URL(serviceUrl);
+  u.searchParams.set("service", "WFS");
+  u.searchParams.set("version", "2.0.0");
+  u.searchParams.set("request", "GetCapabilities");
+  const r = await authedFetch(serviceUrl, u.toString());
+  if (!r.ok) return null;
+  const text = await r.text();
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  const fts = doc.getElementsByTagNameNS("*", "FeatureType");
+  for (const ft of fts) {
+    const nameEl = ft.getElementsByTagNameNS("*", "Name")[0];
+    if (!nameEl || nameEl.textContent.trim() !== typename) continue;
+    const wbb = ft.getElementsByTagNameNS("http://www.opengis.net/ows/1.1", "WGS84BoundingBox")[0]
+      || ft.getElementsByTagNameNS("*", "WGS84BoundingBox")[0];
+    if (!wbb) continue;
+    const lcRaw = wbb.getElementsByTagNameNS("*", "LowerCorner")[0]?.textContent.trim();
+    const ucRaw = wbb.getElementsByTagNameNS("*", "UpperCorner")[0]?.textContent.trim();
+    if (!lcRaw || !ucRaw) continue;
+    const lc = lcRaw.split(/\s+/).map(Number);
+    const uc = ucRaw.split(/\s+/).map(Number);
+    if (lc.length < 2 || uc.length < 2) continue;
+    return ol.proj.transformExtent([lc[0], lc[1], uc[0], uc[1]], "EPSG:4326", "EPSG:3857");
+  }
+  return null;
+}
+
+async function _getOapifExtent(serviceUrl) {
+  const u = new URL(serviceUrl);
+  const m = u.pathname.match(/^(.+\/collections\/[^\/]+)(\/items)?\/?$/);
+  if (m) u.pathname = m[1];
+  u.searchParams.set("f", "json");
+  const r = await authedFetch(serviceUrl, u.toString());
+  if (!r.ok) return null;
+  const j = await r.json();
+  const bbox = j?.extent?.spatial?.bbox?.[0];
+  if (!Array.isArray(bbox) || bbox.length < 4) return null;
+  const [minX, minY, maxX, maxY] = bbox.slice(0, 4).map(Number);
+  if (![minX, minY, maxX, maxY].every(Number.isFinite)) return null;
+  return ol.proj.transformExtent([minX, minY, maxX, maxY], "EPSG:4326", "EPSG:3857");
+}
+
+async function _getVtExtentFromStyle(styleUrl) {
+  const r = await fetch(styleUrl);
+  if (!r.ok) return null;
+  const j = await r.json();
+  const sources = j.sources || {};
+  for (const src of Object.values(sources)) {
+    if (Array.isArray(src.bounds) && src.bounds.length === 4) {
+      return ol.proj.transformExtent(src.bounds.map(Number), "EPSG:4326", "EPSG:3857");
+    }
+  }
+  return null;
+}
+
+function zoomToLayer(item, force = false) {
+  return getLayerExtent(item).then(extent => {
+    if (!extent) {
+      if (force) Toast.info("Layer-Ausdehnung nicht ermittelbar.");
+      return;
+    }
+    const cur = view.calculateExtent(map.getSize());
+    if (!force && ol.extent.intersects(extent, cur)) return; // already visible
+    view.fit(extent, { padding: [40, 40, 40, 40], maxZoom: 16, duration: 400 });
+  });
+}
+
+/* Convert OpenLayers tile coordinates (z, x, y) into a Bing-style quadkey
+   string. Used by the {q} XYZ-template path (e.g. VirtualEarth tiles). */
+function tileXYZToQuadKey(x, y, z) {
+  let q = "";
+  for (let i = z; i > 0; i--) {
+    let digit = 0;
+    const mask = 1 << (i - 1);
+    if ((x & mask) !== 0) digit += 1;
+    if ((y & mask) !== 0) digit += 2;
+    q += digit;
+  }
+  return q;
+}
+
+function hostOf(url) {
+  try { return new URL(url).host; } catch { return ""; }
+}
+
+function defaultVectorStyle() {
+  const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#3b82f6";
+  return [new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: accent, width: 2 }),
+    fill:   new ol.style.Fill({ color: "rgba(59,130,246,0.20)" }),
+    image:  new ol.style.Circle({
+      radius: 5,
+      stroke: new ol.style.Stroke({ color: accent, width: 2 }),
+      fill:   new ol.style.Fill({ color: "rgba(59,130,246,0.6)" })
+    })
+  })];
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: map setup
+───────────────────────────────────────────────────────────────────────── */
+const view = new ol.View({
+  center: ol.proj.fromLonLat([8.23, 46.82]),
+  zoom: 7,
+  constrainResolution: true
+});
+
+const baseLayer = new ol.layer.Tile({
+  source: new ol.source.OSM({ crossOrigin: "anonymous" })
+});
+baseLayer.set("_isBase", true);
+
+const map = new ol.Map({
+  target: "map",
+  layers: [baseLayer],
+  view,
+  controls: ol.control.defaults.defaults({ attributionOptions: { collapsible: true } })
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: active layers state
+───────────────────────────────────────────────────────────────────────── */
+const ActiveLayers = {
+  items: [],
+  byKey: new Map(),
+  pending: new Map(),
+
+  async add(catalogId, layerPath, layerDef, opts = {}) {
+    const id = catalogId + "::" + layerPath;
+    const layerKey = layerPath.split("/").pop();
+    if (this.byKey.has(id)) return this.byKey.get(id);
+    if (this.pending.has(id)) return this.pending.get(id).promise;
+
+    const pending = { cancelled: false, promise: null };
+    const promise = (async () => {
+      let layer;
+      try {
+        const type = layerDef.type;
+        if (type === "ogc_wms")            layer = await SourceFactory.buildWMS(layerDef);
+        else if (type === "ogc_wmts")      layer = await SourceFactory.buildWMTS(layerDef);
+        else if (type === "ogc_wfs")       layer = await SourceFactory.buildWFS(layerDef);
+        else if (type === "ogc_api_features") layer = await SourceFactory.buildOgcApiFeatures(layerDef);
+        else if (type === "ogc_vectorTiles") layer = await SourceFactory.buildVectorTiles(layerDef);
+        else throw new Error("Layertyp nicht unterstützt: " + type);
+      } catch (err) {
+        const cb = findLayerCheckbox(layerPath);
+        if (cb) cb.checked = false;
+        if (err && err.name === "AuthRequiredError") {
+          TokenDialog.open(err.serviceUrl, layerDef.name || "", () => {
+            ActiveLayers.add(catalogId, layerPath, layerDef, opts).then(it => {
+              if (it) {
+                const cb2 = findLayerCheckbox(layerPath);
+                if (cb2) cb2.checked = true;
+              }
+            });
+          });
+          return null;
+        }
+        Toast.err("Fehler beim Laden: " + (layerDef.name || layerKey) + " — " + err.message);
+        return null;
+      }
+
+      if (pending.cancelled) return null;
+
+      const rawOpacity = typeof opts.opacity === "number"
+        ? opts.opacity
+        : (typeof layerDef.opacity === "number" ? layerDef.opacity : 1);
+      const initialOpacity = Math.max(0, Math.min(1, rawOpacity));
+      layer.setOpacity(initialOpacity);
+      if (typeof opts.visible === "boolean") layer.setVisible(opts.visible);
+      layer.set("_def", layerDef);
+      layer.set("_layerKey", layerKey);
+      layer.set("_layerPath", layerPath);
+      layer.set("_catalogId", catalogId);
+
+      attachStatusTracking(layer);
+      layer.on("change:opacity", () => UI.syncLayerOpacity(id));
+
+      map.addLayer(layer);
+      const item = { id, catalogId, layerKey, layerPath, def: layerDef, layer, status: "loading" };
+      this.items.push(item);
+      this.byKey.set(id, item);
+      UI.markTreeItemActive(id, true);
+      UI.syncLayerOpacity(id);
+      UI.renderActive();
+      Permalink.scheduleUpdate();
+
+      if (!opts._skipAutoZoom) zoomToLayer(item, false).catch(() => {});
+      return item;
+    })();
+    pending.promise = promise;
+    this.pending.set(id, pending);
+    try {
+      return await promise;
+    } finally {
+      if (this.pending.get(id) === pending) this.pending.delete(id);
+    }
+  },
+
+  remove(id) {
+    const pending = this.pending.get(id);
+    if (pending) {
+      pending.cancelled = true;
+      this.pending.delete(id);
+    }
+    const item = this.byKey.get(id);
+    if (!item) return;
+    map.removeLayer(item.layer);
+    this.items = this.items.filter(i => i.id !== id);
+    this.byKey.delete(id);
+    const cb = findLayerCheckbox(item.layerPath);
+    if (cb) cb.checked = false;
+    UI.markTreeItemActive(id, false);
+    UI.renderActive();
+    Permalink.scheduleUpdate();
+  },
+
+  setOpacity(id, val) {
+    const item = this.byKey.get(id);
+    if (item) { item.layer.setOpacity(val); Permalink.scheduleUpdate(); }
+  },
+
+  setVisible(id, v) {
+    const item = this.byKey.get(id);
+    if (!item || item.layer.getVisible() === v) return;
+    item.layer.setVisible(v);
+    // Targeted toggle: avoid the full active-pane rebuild storm during
+    // permalink restore (which can toggle many layers in a tight loop).
+    const li = document.querySelector('.active-item[data-id="' + cssEscape(id) + '"]');
+    if (li) li.classList.toggle("hidden-layer", !v);
+    Permalink.scheduleUpdate();
+  },
+
+  reorder(ids) {
+    // ids: top-of-list -> top-of-map
+    const newItems = ids.map(id => this.byKey.get(id)).filter(Boolean);
+    this.items = newItems;
+    // Compose layers: base first, then bottom-to-top of map order.
+    // List top = map top => reverse for z-stack.
+    const layers = map.getLayers();
+    layers.clear();
+    layers.push(baseLayer);
+    for (let i = newItems.length - 1; i >= 0; i--) layers.push(newItems[i].layer);
+    Permalink.scheduleUpdate();
+  },
+
+  clear() {
+    for (const pending of this.pending.values()) pending.cancelled = true;
+    this.pending.clear();
+    for (const i of [...this.items]) this.remove(i.id);
+  }
+};
+
+function attachStatusTracking(layer) {
+  const src = layer.getSource();
+  const setStatus = s => {
+    layer.set("_status", s);
+    UI.updateActiveStatus(layer);
+  };
+  if (src instanceof ol.source.TileImage || src instanceof ol.source.UrlTile) {
+    src.on("tileloadstart", () => setStatus("loading"));
+    src.on("tileloadend",   () => setStatus("ok"));
+    src.on("tileloaderror", () => setStatus("error"));
+  } else if (src instanceof ol.source.Vector) {
+    src.on("featuresloadstart", () => setStatus("loading"));
+    src.on("featuresloadend",   () => setStatus("ok"));
+    src.on("featuresloaderror", () => setStatus("error"));
+  } else {
+    setStatus("ok");
+  }
+}
+
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+}
+
+function findLayerCheckbox(layerPath) {
+  return document.querySelector('input[data-layer-path="' + cssEscape(layerPath) + '"]');
+}
+
+// Visualisable layer types. WCS/web are catalogue-listed but not map-rendered.
+const SUPPORTED_LAYER_TYPES = ["ogc_wms", "ogc_wmts", "ogc_wfs", "ogc_api_features", "ogc_vectorTiles"];
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: UI — catalog dropdown, tree, active list
+───────────────────────────────────────────────────────────────────────── */
+const UI = {
+  currentCatalogId: null,
+  currentCatalogData: null,
+  searchQuery: "",
+  filterTypes: new Set(SUPPORTED_LAYER_TYPES),
+  scopeAll: false,
+
+  async initCatalogDropdown() {
+    const sel = document.getElementById("catalog-select");
+    sel.innerHTML = "";
+    for (const entry of Catalogs.index) {
+      const opt = document.createElement("option");
+      opt.value = entry.name;
+      opt.textContent = entry.titel;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => {
+      this.switchCatalog(sel.value);
+    });
+  },
+
+  async switchCatalog(name, restoredLayers /* optional [{path|key, opacity, visible}] */) {
+    const doSwitch = async () => {
+      this.currentCatalogId = name;
+      try {
+        this.currentCatalogData = await Catalogs.loadCatalog(name);
+      } catch (e) {
+        Toast.err(e.message);
+        return;
+      }
+      ActiveLayers.clear();
+      this.renderTree();
+      const sel = document.getElementById("catalog-select");
+      if (sel.value !== name) sel.value = name;
+
+      if (restoredLayers && restoredLayers.length) {
+        for (const r of restoredLayers) {
+          let path = r.path;
+          let def = path ? this.findLayerByPath(path) : null;
+          if (!def && r.key) {
+            // Legacy permalink: only a bare key was stored. Resolve to a
+            // path via first-match (94 catalogue groups share keys like
+            // "flurstuecke" — first match wins, with a console hint).
+            const hit = this.findLayerByKey(r.key);
+            if (hit) { def = hit.def; path = hit.path; }
+          }
+          if (!def || !path) continue;
+          const item = await ActiveLayers.add(name, path, def, {
+            opacity: r.opacity,
+            visible: r.visible,
+            _skipAutoZoom: true
+          });
+          if (item) {
+            const cb = findLayerCheckbox(path);
+            if (cb) cb.checked = true;
+          }
+        }
+      }
+    };
+
+    if (document.startViewTransition) {
+      const transition = document.startViewTransition(doSwitch);
+      await transition.updateCallbackDone;
+    } else {
+      await doSwitch();
+    }
+  },
+
+  // Resolve a layer definition by its full path
+  // `country/[group/]layerKey` against the current catalogue.
+  findLayerByPath(path) {
+    const data = this.currentCatalogData;
+    if (!data || !path) return null;
+    const parts = path.split("/");
+    if (parts.length === 2) {
+      const [country, key] = parts;
+      return data[country]?.themen?.[key] || null;
+    }
+    if (parts.length === 3) {
+      const [country, group, key] = parts;
+      return data[country]?.themen?.[group]?.layers?.[key] || null;
+    }
+    return null;
+  },
+
+  // Legacy lookup by bare key (used for restoring old permalinks).
+  // Returns the *first* match plus its derived path so the caller
+  // can migrate. Multiple identical keys may exist in real catalogues
+  // (e.g. "flurstuecke" appears 12× across federal states) — pick first
+  // and warn.
+  findLayerByKey(key) {
+    const data = this.currentCatalogData;
+    if (!data) return null;
+    for (const [country, c] of Object.entries(data)) {
+      const themen = c.themen || {};
+      for (const [k, v] of Object.entries(themen)) {
+        if (k === key && v.type) {
+          const path = country + "/" + k;
+          console.warn("findLayerByKey: legacy key", key, "matched", path, "— migrate permalink to path");
+          return { def: v, path };
+        }
+        if (v.layers) {
+          for (const [k2, v2] of Object.entries(v.layers)) {
+            if (k2 === key) {
+              const path = country + "/" + k + "/" + k2;
+              console.warn("findLayerByKey: legacy key", key, "matched", path, "— migrate permalink to path");
+              return { def: v2, path };
+            }
+          }
+        }
+      }
+    }
+    return null;
+  },
+
+  async renderTree() {
+    const root = document.getElementById("tree");
+    const v = (this._renderVersion = (this._renderVersion || 0) + 1);
+
+    if (this.scopeAll) {
+      const loaders = Catalogs.index.map(e => Catalogs.loadCatalog(e.name).catch(() => null));
+      const all = await Promise.all(loaders);
+      if (v !== this._renderVersion) return; // a newer render started
+      root.innerHTML = "";
+      for (let i = 0; i < Catalogs.index.length; i++) {
+        const entry = Catalogs.index[i];
+        const data = all[i];
+        if (!data) continue;
+        this._renderCatalogBranch(entry.name, entry.titel, data, root);
+      }
+    } else {
+      root.innerHTML = "";
+      if (this.currentCatalogData) {
+        this._renderCatalogBranch(this.currentCatalogId, null, this.currentCatalogData, root, /*topLevel=*/ true);
+      }
+    }
+
+    if (root.children.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "tree-empty";
+      empty.textContent = this.searchQuery ? "Keine Treffer." : "Kein Inhalt.";
+      root.appendChild(empty);
+    }
+  },
+
+  _renderCatalogBranch(catalogId, catalogTitle, data, parent, topLevel = false) {
+    const q = this.searchQuery.trim().toLowerCase();
+    const matchesType = t => this.filterTypes.has(t);
+
+    const countryContainers = [];
+
+    for (const [countryKey, country] of Object.entries(data)) {
+      const themen = country.themen || {};
+      const countryEntries = [];
+
+      for (const [layerKey, def] of Object.entries(themen)) {
+        if (def.layers) {
+          const subs = Object.entries(def.layers)
+            .filter(([k, l]) => matchesType(l.type))
+            .filter(([k, l]) => !q || (l.name || "").toLowerCase().includes(q) || k.toLowerCase().includes(q));
+          if (subs.length === 0) continue;
+          countryEntries.push({ kind: "group", key: layerKey, def, subs });
+        } else if (def.type) {
+          if (!matchesType(def.type)) continue;
+          if (q && !(def.name || "").toLowerCase().includes(q) && !layerKey.toLowerCase().includes(q)) continue;
+          countryEntries.push({ kind: "layer", key: layerKey, def });
+        }
+      }
+      if (countryEntries.length === 0) continue;
+
+      const li = document.createElement("li");
+      li.className = "group";
+      li.setAttribute("role", "treeitem");
+      li.setAttribute("aria-expanded", topLevel ? "true" : "false");
+      const row = document.createElement("div");
+      row.className = "row";
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.innerHTML = `
+        <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span></span>
+      `;
+      row.querySelector("span").textContent = country.menu || countryKey;
+      row.addEventListener("click", () => {
+        const expanded = li.getAttribute("aria-expanded") === "true";
+        li.setAttribute("aria-expanded", String(!expanded));
+      });
+      row.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); row.click(); }
+      });
+      li.appendChild(row);
+
+      const ul = document.createElement("ul");
+      ul.setAttribute("role", "group");
+      for (const entry of countryEntries) {
+        ul.appendChild(this._renderEntry(entry, catalogId, [countryKey]));
+      }
+      li.appendChild(ul);
+      countryContainers.push(li);
+    }
+
+    if (countryContainers.length === 0) return;
+
+    if (catalogTitle) {
+      // wrap in catalog top-level group
+      const catLi = document.createElement("li");
+      catLi.className = "group catalog-group";
+      catLi.setAttribute("role", "treeitem");
+      catLi.setAttribute("aria-expanded", "false");
+      const row = document.createElement("div");
+      row.className = "row";
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.style.fontWeight = "600";
+      row.innerHTML = `
+        <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span></span>
+      `;
+      row.querySelector("span").textContent = catalogTitle;
+      row.addEventListener("click", () => {
+        const ex = catLi.getAttribute("aria-expanded") === "true";
+        catLi.setAttribute("aria-expanded", String(!ex));
+      });
+      catLi.appendChild(row);
+      const ul = document.createElement("ul");
+      ul.setAttribute("role", "group");
+      for (const c of countryContainers) ul.appendChild(c);
+      catLi.appendChild(ul);
+      parent.appendChild(catLi);
+    } else {
+      for (const c of countryContainers) parent.appendChild(c);
+    }
+  },
+
+  _renderEntry(entry, catalogId, pathParts) {
+    catalogId = catalogId || this.currentCatalogId;
+    pathParts = pathParts || [];
+    if (entry.kind === "group") {
+      const li = document.createElement("li");
+      li.className = "group";
+      li.setAttribute("role", "treeitem");
+      li.setAttribute("aria-expanded", "false");
+      const row = document.createElement("div");
+      row.className = "row";
+      row.tabIndex = 0;
+      row.innerHTML = `
+        <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span></span>
+      `;
+      row.querySelector("span").textContent = entry.def.name || entry.key;
+      row.addEventListener("click", () => {
+        const expanded = li.getAttribute("aria-expanded") === "true";
+        li.setAttribute("aria-expanded", String(!expanded));
+      });
+      li.appendChild(row);
+      const ul = document.createElement("ul");
+      ul.setAttribute("role", "group");
+      for (const [k, sub] of entry.subs) {
+        ul.appendChild(this._renderLayerLi(k, sub, catalogId, [...pathParts, entry.key, k]));
+      }
+      li.appendChild(ul);
+      if (entry.def.seperator) li.classList.add("separator-after");
+      return li;
+    }
+    const layerLi = this._renderLayerLi(entry.key, entry.def, catalogId, [...pathParts, entry.key]);
+    if (entry.def.seperator) layerLi.classList.add("separator-after");
+    return layerLi;
+  },
+
+  _renderLayerLi(key, def, catalogId, pathParts) {
+    catalogId = catalogId || this.currentCatalogId;
+    pathParts = pathParts && pathParts.length ? pathParts : [key];
+    const path = pathParts.join("/");
+    const id = catalogId + "::" + path;
+    const li = document.createElement("li");
+    li.className = "layer";
+    li.setAttribute("role", "treeitem");
+    li.dataset.layerId = id;
+    li.dataset.layerPath = path;
+
+    const supported = SUPPORTED_LAYER_TYPES.includes(def.type);
+    const isWeb = def.type === "web";
+    const isWcs = def.type === "ogc_wcs";
+
+    // URL safety check
+    const p = parseUri(def.uri || "");
+    const url = isWeb ? def.uri : p.url;
+    const safe = isSafeUrl(url);
+    const insecure = safe && url && !isHttps(url);
+
+    if (!supported || !safe) li.classList.add("unsupported");
+    if (!safe) li.classList.add("unsafe");
+    if (insecure) li.classList.add("insecure");
+
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.layerPath = path;
+    cb.dataset.catalogId = catalogId;
+    cb.disabled = !supported || !safe;
+    if (ActiveLayers.byKey.has(id)) cb.checked = true;
+    cb.addEventListener("change", async () => {
+      if (cb.checked) {
+        // Tokenise the loading state so a fast uncheck→recheck doesn't let
+        // the original finally clobber the new attempt's spinner + disabled.
+        const myToken = Symbol("load");
+        li._loadingToken = myToken;
+        li.classList.add("loading");
+        cb.disabled = true;
+        try {
+          await ActiveLayers.add(catalogId, path, def);
+        } finally {
+          if (li._loadingToken === myToken) {
+            li.classList.remove("loading");
+            if (supported && safe) cb.disabled = false;
+          }
+        }
+      } else {
+        ActiveLayers.remove(id);
+      }
+    });
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = def.name || key;
+
+    const badges = document.createElement("span");
+    badges.className = "badges";
+    const badge = document.createElement("span");
+    badge.className = "badge svc-tag";
+    badge.textContent = typeBadge(def.type);
+    if (def.type) badge.dataset.type = def.type;
+    badges.appendChild(badge);
+    if (insecure) {
+      const w = document.createElement("span");
+      w.className = "badge insecure-badge";
+      w.textContent = "HTTP";
+      w.title = "Unverschlüsselter HTTP-Endpunkt";
+      badges.appendChild(w);
+    }
+
+    label.appendChild(cb);
+    label.appendChild(name);
+    label.appendChild(badges);
+    li.appendChild(label);
+
+    // Inline transparency control — only visible while the layer is active
+    if (supported && safe) {
+      const ctrl = document.createElement("div");
+      ctrl.className = "layer-controls";
+      ctrl.innerHTML = `
+        <label aria-label="Transparenz" title="Transparenz">
+          <input type="range" min="0" max="100" step="1" value="100">
+        </label>
+        <span class="op-val">100%</span>
+        <button type="button" class="icon-btn-sm zoom" aria-label="Auf Layer-Ausdehnung zoomen" title="Auf Layer-Ausdehnung zoomen">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8 11h6M11 8v6" stroke-linecap="round"/></svg>
+        </button>
+      `;
+      const slider = ctrl.querySelector("input[type=range]");
+      const valEl = ctrl.querySelector(".op-val");
+      slider.addEventListener("input", () => {
+        const it = ActiveLayers.byKey.get(id);
+        if (!it) return;
+        const v = Number(slider.value) / 100;
+        it.layer.setOpacity(v);   // emits change:opacity → other UIs sync
+        valEl.textContent = slider.value + "%";
+      });
+      ctrl.querySelector(".zoom").addEventListener("click", () => {
+        const it = ActiveLayers.byKey.get(id);
+        if (it) zoomToLayer(it, /*force=*/ true);
+      });
+      li.appendChild(ctrl);
+
+      // Reflect current state if layer is already active (e.g. after restore)
+      const existing = ActiveLayers.byKey.get(id);
+      if (existing) {
+        li.classList.add("active");
+        const op = Math.round(existing.layer.getOpacity() * 100);
+        slider.value = op;
+        valEl.textContent = op + "%";
+      }
+    }
+
+    if (isWeb) {
+      label.title = "Externer Link: in neuem Tab öffnen";
+      cb.disabled = true;
+      label.addEventListener("click", e => {
+        if (e.target === cb) return;
+        e.preventDefault();
+        if (safe) window.open(url, "_blank", "noopener,noreferrer");
+      });
+    } else if (isWcs) {
+      label.title = "WCS — wird in der Karte nicht visualisiert";
+    } else if (!safe) {
+      label.title = "Service-URL nicht sicher (kein http/https oder ungültig)";
+    } else if (insecure) {
+      label.title = "HTTP-Endpunkt (unverschlüsselt). Funktioniert nur, wenn die Seite ebenfalls über HTTP geladen wird.";
+    }
+
+    return li;
+  },
+
+  renderActive() {
+    const root = document.getElementById("active-list");
+    const pane = document.getElementById("active-pane");
+    root.innerHTML = "";
+    const empty = ActiveLayers.items.length === 0;
+    pane.classList.toggle("empty", empty);
+    if (empty) {
+      const li = document.createElement("li");
+      li.className = "active-empty";
+      li.textContent = "Keine aktiven Layer.";
+      root.appendChild(li);
+      return;
+    }
+    for (const item of ActiveLayers.items) {
+      root.appendChild(this._renderActiveItem(item));
+    }
+  },
+
+  _renderActiveItem(item) {
+    const li = document.createElement("li");
+    li.className = "active-item";
+    li.dataset.id = item.id;
+    // Breadcrumb tooltip — disambiguates the 94 catalogue groups sharing
+    // bare keys like "flurstuecke" across federal states.
+    const crumb = (item.layerPath || item.layerKey).replace(/\//g, " › ");
+    li.title = (item.def.name || item.layerKey) + "\n" + crumb;
+    li.innerHTML = `
+      <span class="grip" aria-hidden="true" title="Reihenfolge ziehen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>
+      </span>
+      <button class="icon-btn vis" type="button" aria-label="Sichtbarkeit umschalten" title="Sichtbar/Unsichtbar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+      <span class="name"></span>
+      <span class="status" title=""></span>
+      <button class="icon-btn rm" type="button" aria-label="Layer entfernen" title="Entfernen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18" stroke-linecap="round"/></svg>
+      </button>
+    `;
+    li.querySelector(".name").textContent = item.def.name || item.layerKey;
+    if (!item.layer.getVisible()) li.classList.add("hidden-layer");
+    li.querySelector(".vis").addEventListener("click", () => {
+      const v = !item.layer.getVisible();
+      ActiveLayers.setVisible(item.id, v);
+    });
+    li.querySelector(".rm").addEventListener("click", () => ActiveLayers.remove(item.id));
+    this.updateActiveStatus(item.layer, li);
+    return li;
+  },
+
+  // Mirror opacity to every slider tied to this layer id (tree + active pane)
+  syncLayerOpacity(id) {
+    const item = ActiveLayers.byKey.get(id);
+    if (!item) return;
+    const pct = Math.round(item.layer.getOpacity() * 100);
+    const sel = '[data-layer-id="' + cssEscape(id) + '"] input[type=range], ' +
+                '.active-item[data-id="' + cssEscape(id) + '"] input[type=range]';
+    document.querySelectorAll(sel).forEach(s => {
+      if (s.value !== String(pct)) s.value = pct;
+      const v = s.parentElement?.parentElement?.querySelector(".op-val")
+             || s.closest(".meta")?.querySelector(".op-val")
+             || s.closest(".layer-controls")?.querySelector(".op-val");
+      if (v) v.textContent = pct + "%";
+    });
+  },
+
+  // Mark a tree li.layer as active so its inline-controls become visible.
+  markTreeItemActive(id, active) {
+    document.querySelectorAll('[data-layer-id="' + cssEscape(id) + '"]').forEach(li => {
+      li.classList.toggle("active", !!active);
+    });
+  },
+
+  updateActiveStatus(layer, liArg) {
+    // Use _layerPath, not _layerKey — bare keys collide across catalogue
+    // groups, so for any layer inside a group the by-key id misses the DOM.
+    const id = layer.get("_catalogId") + "::" + layer.get("_layerPath");
+    const li = liArg || document.querySelector('.active-item[data-id="' + cssEscape(id) + '"]');
+    if (!li) return;
+    const dot = li.querySelector(".status");
+    const status = layer.get("_status") || "ok";
+    dot.classList.remove("ok", "loading", "error");
+    dot.classList.add(status);
+    dot.title = ({ ok: "Geladen", loading: "Lädt…", error: "Fehler" })[status] || "";
+  }
+};
+
+function typeBadge(t) {
+  return ({
+    ogc_wms: "WMS", ogc_wmts: "WMTS", ogc_wfs: "WFS",
+    ogc_api_features: "OGC API", ogc_wcs: "WCS",
+    ogc_vectorTiles: "VectorTiles", web: "URL"
+  })[t] || (t || "?").toUpperCase();
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: identify (GetFeatureInfo / vector hit)
+───────────────────────────────────────────────────────────────────────── */
+const Identify = (() => {
+  const popup = document.getElementById("popup");
+  const tabsEl = document.getElementById("popup-tabs");
+  const bodyEl = document.getElementById("popup-body");
+  let coord;
+  let overlay;
+  // Tool is opt-in: default off so map clicks don't accidentally fire
+  // expensive GetFeatureInfo calls to every visible service.
+  let enabled = false;
+
+  function setEnabled(on) {
+    enabled = !!on;
+    document.getElementById("app").classList.toggle("identify-active", enabled);
+    if (!enabled && popup.classList.contains("open")) close();
+  }
+
+  function init() {
+    overlay = new ol.Overlay({
+      element: popup,
+      autoPan: { animation: { duration: 200 } }
+    });
+    map.addOverlay(overlay);
+    document.getElementById("popup-close").addEventListener("click", close);
+    map.on("singleclick", onClick);
+    // ESC closes the popup, arrow-left/right move between tabs.
+    document.addEventListener("keydown", e => {
+      if (!popup.classList.contains("open")) return;
+      if (e.key === "Escape") { close(); return; }
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        const tabs = [...tabsEl.querySelectorAll(".tab")];
+        if (!tabs.length) return;
+        const cur = tabs.findIndex(t => t.getAttribute("aria-selected") === "true");
+        const next = (cur + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+        tabs[next].click();
+        tabs[next].focus();
+        e.preventDefault();
+      }
+    });
+    // Reposition popup on pan / zoom so it stays attached to its coord.
+    map.on("moveend", () => {
+      if (popup.classList.contains("open") && coord) positionPopup(coord);
+    });
+  }
+
+  function close() {
+    popup.classList.remove("open");
+    overlay.setPosition(undefined);
+  }
+
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error("Zeitüberschreitung")), ms))
+    ]);
+  }
+
+  async function onClick(evt) {
+    if (!enabled) return;
+    coord = evt.coordinate;
+
+    // Build a query per visible active layer, dispatch all in parallel
+    // with a per-layer timeout, then render once all settle.
+    const queries = ActiveLayers.items
+      .filter(item => item.layer.getVisible())
+      .map(item => {
+        const type = item.def.type;
+        const layer = item.layer;
+        const job = (async () => {
+          if (type === "ogc_wms") {
+            const r = await queryWMS(layer, evt);
+            return r ? { item, kind: "fields", data: r } : null;
+          }
+          if (type === "ogc_wfs" || type === "ogc_api_features" || type === "ogc_vectorTiles") {
+            const features = [];
+            map.forEachFeatureAtPixel(evt.pixel, (f, l) => {
+              if (l === layer) features.push(f);
+            }, { hitTolerance: 4 });
+            if (!features.length) return null;
+            return {
+              item, kind: "fields",
+              data: features.map(f => f.getProperties()).map(p => {
+                const c = { ...p }; delete c.geometry; return c;
+              })
+            };
+          }
+          return null;
+        })();
+        return withTimeout(job, 10000).catch(err => ({
+          item, kind: "error", data: err.message
+        }));
+      });
+
+    const settled = await Promise.all(queries);
+    const results = settled.filter(Boolean);
+    render(results, evt.coordinate);
+  }
+
+  async function queryWMS(layer, evt) {
+    const src = layer.getSource();
+    const viewRes = view.getResolution();
+    const projection = view.getProjection();
+    const url = src.getFeatureInfoUrl(evt.coordinate, viewRes, projection, {
+      INFO_FORMAT: "application/json",
+      FEATURE_COUNT: 10
+    });
+    if (!url) return null;
+    const serviceUrl = layer.get("_serviceUrl");
+    let resp;
+    try {
+      resp = await authedFetch(serviceUrl, url);
+    } catch {
+      return null;
+    }
+    if (resp.status === 401 || resp.status === 403) {
+      handleAuthError(layer);
+      throw new Error("Authentifizierung erforderlich");
+    }
+    if (!resp.ok) return null;
+    const ct = (resp.headers.get("content-type") || "").toLowerCase();
+    if (ct.includes("json")) {
+      const j = await resp.json();
+      if (j.features && j.features.length) {
+        return j.features.map(f => f.properties || {});
+      }
+      return null;
+    }
+    const body = await resp.text();
+    if (!body.trim()) return null;
+    // MapServer / GeoServer / OGC return ServiceException XML when
+    // GetFeatureInfo is disabled (or the layer isn't queryable). Detect
+    // and drop instead of showing the raw error text to the user.
+    if (ct.includes("xml") || /<ServiceException|msWMSDispatch|ows_enable_request|request not enabled/i.test(body)) {
+      return null;
+    }
+    return { _html: safeHtml(body) };
+  }
+
+  function handleAuthError(layer) {
+    const url = layer.get("_serviceUrl");
+    TokenDialog.open(url, layer.get("_def")?.name || "");
+  }
+
+  function render(results, coordinate) {
+    tabsEl.innerHTML = "";
+    bodyEl.innerHTML = "";
+    if (results.length === 0) {
+      const div = document.createElement("div");
+      div.className = "empty";
+      div.textContent = "Keine Informationen an dieser Stelle.";
+      bodyEl.appendChild(div);
+      popup.classList.add("open");
+      overlay.setPosition(coordinate);
+      positionPopup(coordinate);
+      return;
+    }
+
+    results.forEach((r, idx) => {
+      const tab = document.createElement("button");
+      tab.className = "tab";
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", String(idx === 0));
+      tab.textContent = (r.item.def.name || r.item.layerKey).slice(0, 28);
+      tab.addEventListener("click", () => activate(idx));
+      tabsEl.appendChild(tab);
+    });
+
+    function activate(idx) {
+      [...tabsEl.children].forEach((t, i) => t.setAttribute("aria-selected", String(i === idx)));
+      bodyEl.innerHTML = "";
+      const r = results[idx];
+      if (r.kind === "error") {
+        const div = document.createElement("div");
+        div.className = "empty";
+        div.textContent = r.data;
+        bodyEl.appendChild(div);
+        return;
+      }
+      if (Array.isArray(r.data)) {
+        for (const props of r.data) {
+          bodyEl.appendChild(renderFields(props));
+        }
+      } else if (r.data && r.data._html) {
+        const wrap = document.createElement("div");
+        // _html is already DOMPurify-sanitised via safeHtml(); assigning
+        // it to innerHTML reinflates the parsed/cleaned subtree.
+        wrap.innerHTML = r.data._html;
+        bodyEl.appendChild(wrap);
+      }
+    }
+    activate(0);
+    popup.classList.add("open");
+    overlay.setPosition(coordinate);
+    positionPopup(coordinate);
+  }
+
+  function renderFields(props) {
+    const table = document.createElement("table");
+    let any = false;
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v === null || v === undefined || v === "") continue;
+      if (typeof v === "object") continue;
+      any = true;
+      const tr = document.createElement("tr");
+      const th = document.createElement("th"); th.textContent = k;
+      const td = document.createElement("td"); td.textContent = String(v);
+      tr.appendChild(th); tr.appendChild(td);
+      table.appendChild(tr);
+    }
+    if (!any) {
+      const div = document.createElement("div");
+      div.className = "empty";
+      div.textContent = "Keine Attribute.";
+      return div;
+    }
+    return table;
+  }
+
+  function positionPopup(coordinate) {
+    // Use Floating UI for nicer placement: anchor is screen-space pixel
+    const pixel = map.getPixelFromCoordinate(coordinate);
+    const mapEl = document.getElementById("map-wrap");
+    const rect = mapEl.getBoundingClientRect();
+    const virtualEl = {
+      getBoundingClientRect: () => ({
+        x: rect.left + pixel[0],
+        y: rect.top + pixel[1],
+        top: rect.top + pixel[1],
+        left: rect.left + pixel[0],
+        right: rect.left + pixel[0],
+        bottom: rect.top + pixel[1],
+        width: 0, height: 0
+      })
+    };
+    if (window.FloatingUIDOM) {
+      window.FloatingUIDOM.computePosition(virtualEl, popup, {
+        placement: "top",
+        middleware: [
+          window.FloatingUIDOM.offset(10),
+          window.FloatingUIDOM.flip(),
+          window.FloatingUIDOM.shift({ padding: 8 })
+        ]
+      }).then(({ x, y }) => {
+        popup.style.left = x + "px";
+        popup.style.top = y + "px";
+        popup.style.position = "fixed";
+      });
+    }
+  }
+
+  return { init, close, setEnabled };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: token dialog
+───────────────────────────────────────────────────────────────────────── */
+const TokenDialog = (() => {
+  const dlg = document.getElementById("token-dialog");
+  const input = document.getElementById("token-input");
+  const desc = document.getElementById("token-dialog-desc");
+  let currentUrl;
+  let pendingRetry = null;
+
+  document.getElementById("token-save").addEventListener("click", () => {
+    if (currentUrl && input.value) {
+      TokenStore.set(currentUrl, input.value);
+      Toast.info("Token gespeichert (nur im Speicher).");
+    }
+    input.value = "";
+    dlg.close();
+    if (typeof pendingRetry === "function") {
+      const fn = pendingRetry;
+      pendingRetry = null;
+      try { fn(); } catch (e) { Toast.err("Wiederholung fehlgeschlagen: " + e.message); }
+    }
+  });
+  document.getElementById("token-cancel").addEventListener("click", () => {
+    input.value = "";
+    pendingRetry = null;
+    dlg.close();
+  });
+
+  // open(url, name)              — show dialog without retry
+  // open(url, name, retryFn)     — invoke retryFn after the user saves a token
+  function open(url, name, retryFn) {
+    currentUrl = url;
+    pendingRetry = (typeof retryFn === "function") ? retryFn : null;
+    desc.textContent = "Layer „" + (name || "") + "“ verlangt einen Token für " + hostOf(url) +
+      ". Der Token wird nur im Arbeitsspeicher gehalten.";
+    if (typeof dlg.showModal === "function") dlg.showModal();
+    else dlg.setAttribute("open", "");
+    requestAnimationFrame(() => input.focus());
+  }
+  return { open };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: permalink
+───────────────────────────────────────────────────────────────────────── */
+const Permalink = (() => {
+  let timer;
+  const MAX_LEN = 8192;
+
+  function scheduleUpdate() {
+    clearTimeout(timer);
+    timer = setTimeout(update, 250);
+  }
+
+  function update() {
+    const state = {
+      c: UI.currentCatalogId,
+      // Each tuple: [path, opacityPct, visibleFlag].
+      // `path` is now country/[group/]layerKey to disambiguate the 94
+      // (catalog,key) collisions seen across federal-state branches.
+      l: ActiveLayers.items.map(i => [
+        i.layerPath,
+        Math.round(i.layer.getOpacity() * 100),
+        i.layer.getVisible() ? 1 : 0
+      ]),
+      v: view.getCenter() ? [
+        ...view.getCenter().map(n => Number(n.toFixed(2))),
+        Number(view.getZoom().toFixed(2))
+      ] : null,
+      d3: document.getElementById("app").classList.contains("mode-3d") ? 1 : 0
+    };
+    const encoded = encodeURIComponent(JSON.stringify(state));
+    const newHash = "#s=" + encoded;
+    if (newHash.length > MAX_LEN) return;
+    history.replaceState(null, "", newHash);
+  }
+
+  function parse() {
+    const h = location.hash;
+    if (!h.startsWith("#s=")) return null;
+    const raw = h.slice(3);
+    if (raw.length > MAX_LEN) return null;
+    try {
+      const obj = JSON.parse(decodeURIComponent(raw));
+      if (typeof obj !== "object" || obj === null) return null;
+      return obj;
+    } catch { return null; }
+  }
+
+  async function restore() {
+    const s = parse();
+    if (!s) return false;
+    if (!s.c || typeof s.c !== "string") return false;
+    if (!Catalogs.index.some(e => e.name === s.c)) return false;
+    if (s.v && Array.isArray(s.v) && s.v.length === 3) {
+      view.setCenter([s.v[0], s.v[1]]);
+      view.setZoom(s.v[2]);
+    }
+    // Layer-tuple element 0 may be a full path (contains "/") or a legacy
+    // bare key; switchCatalog handles both via findLayerByPath/-Key.
+    const layers = Array.isArray(s.l)
+      ? s.l.filter(x => Array.isArray(x) && typeof x[0] === "string").map(x => {
+          const first = x[0];
+          const restore = {
+            opacity: (Number(x[1]) || 100) / 100,
+            visible: x.length < 3 ? true : x[2] !== 0 && x[2] !== false
+          };
+          if (first.includes("/")) restore.path = first;
+          else restore.key = first;
+          return restore;
+        })
+      : [];
+    await UI.switchCatalog(s.c, layers);
+    if (s.d3) ThreeD.enable();
+    return true;
+  }
+
+  async function copyToClipboard() {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      Toast.info("Permalink kopiert.");
+    } catch {
+      Toast.err("Kopieren nicht möglich.");
+    }
+  }
+
+  view.on("change", scheduleUpdate);
+
+  return { scheduleUpdate, restore, copyToClipboard };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: export / import
+───────────────────────────────────────────────────────────────────────── */
+const ExportModule = (() => {
+  function pngFromMap() {
+    map.once("rendercomplete", () => {
+      try {
+        const size = map.getSize();
+        const canvas = document.createElement("canvas");
+        canvas.width = size[0]; canvas.height = size[1];
+        const ctx = canvas.getContext("2d");
+        document.querySelectorAll("#map canvas").forEach(c => {
+          if (c.width > 0) {
+            const op = c.parentNode?.style?.opacity || "";
+            ctx.globalAlpha = op === "" ? 1 : Number(op);
+            const transform = c.style.transform;
+            const m = /matrix\(([^)]+)\)/.exec(transform);
+            if (m) {
+              const [a, b, c2, d, e, f] = m[1].split(",").map(Number);
+              ctx.setTransform(a, b, c2, d, e, f);
+            } else {
+              ctx.setTransform(1, 0, 0, 1, 0, 0);
+            }
+            ctx.drawImage(c, 0, 0);
+          }
+        });
+        ctx.globalAlpha = 1;
+        canvas.toBlob(blob => {
+          if (!blob) { Toast.err("PNG-Export fehlgeschlagen (CORS-Taint?)."); return; }
+          downloadBlob(blob, "karte.png");
+        });
+      } catch (err) {
+        Toast.err("Export fehlgeschlagen: " + err.message);
+      }
+    });
+    map.renderSync();
+  }
+
+  function sessionJson() {
+    const state = {
+      version: 1,
+      catalog: UI.currentCatalogId,
+      view: {
+        center: view.getCenter(),
+        zoom: view.getZoom()
+      },
+      layers: ActiveLayers.items.map(i => ({
+        path: i.layerPath,
+        opacity: i.layer.getOpacity(),
+        visible: i.layer.getVisible()
+      }))
+    };
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    downloadBlob(blob, "gbl-session.json");
+  }
+
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function importSession(file) {
+    if (file.size > 1024 * 1024) { Toast.err("Datei zu groß."); return; }
+    const text = await file.text();
+    let obj;
+    try { obj = JSON.parse(text); } catch { Toast.err("Ungültiges JSON."); return; }
+    if (!obj || typeof obj !== "object" || obj.version !== 1) { Toast.err("Unbekanntes Schema."); return; }
+    if (typeof obj.catalog !== "string") { Toast.err("Katalog fehlt."); return; }
+    if (!Catalogs.index.some(e => e.name === obj.catalog)) { Toast.err("Katalog unbekannt."); return; }
+
+    // Strict view validation
+    if (obj.view) {
+      if (!Array.isArray(obj.view.center) || obj.view.center.length !== 2) {
+        Toast.err("Ansicht ungültig (center)."); return;
+      }
+      const [x, y] = obj.view.center;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) { Toast.err("Ansicht ungültig (center)."); return; }
+      const z = Number(obj.view.zoom);
+      if (!Number.isFinite(z) || z < 0 || z > 28) { Toast.err("Ansicht ungültig (zoom)."); return; }
+      view.setCenter([x, y]);
+      view.setZoom(z);
+    }
+
+    // Strict layer validation: max count + opacity clamp + path/key migration
+    const rawLayers = Array.isArray(obj.layers) ? obj.layers : [];
+    if (rawLayers.length > 100) { Toast.err("Zu viele Layer (>100)."); return; }
+    const layers = rawLayers
+      .filter(l => l && ((typeof l.path === "string" && l.path.length > 0 && l.path.length < 512) ||
+                         (typeof l.key === "string" && l.key.length > 0 && l.key.length < 256)))
+      .map(l => ({
+        path: typeof l.path === "string" ? l.path : undefined,
+        key: typeof l.key === "string" ? l.key : undefined,
+        opacity: Math.max(0, Math.min(1, Number(l.opacity) || 1)),
+        visible: l.visible !== false
+      }));
+
+    await UI.switchCatalog(obj.catalog, layers);
+    Toast.info("Sitzung importiert.");
+  }
+
+  return { pngFromMap, sessionJson, importSession };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: 3D (lazy)
+───────────────────────────────────────────────────────────────────────── */
+const ThreeD = (() => {
+  let ol3d = null;
+  let loading = false;
+
+  // Pinned versions + SRI hashes for lazy-loaded 3D assets. Update both
+  // together when bumping the version.
+  const SRI = {
+    cesiumCss: "sha384-ghEeMdcWWzRv/BPeUcX835vcKDGrxvROXisl/Btpv3GeekBUXTSPVcFJpI1Tcrgp",
+    cesiumJs:  "sha384-xAdxnnaIzRit+cIXQWeImuZHfoK0MA0EaxSb8rlO3RaT9NWVqgvICnDMtPUI/aar",
+    olcs:      "sha384-hCdjMCQcFoYN2MuCvIfT5/s8KL8Pho5FxmbEtqO2IHcSJZYEy95aVKjNVbd7zKcD"
+  };
+
+  async function ensureLoaded() {
+    if (window.olcs && window.Cesium) return true;
+    if (loading) return false;
+    loading = true;
+    try {
+      const css = document.createElement("link");
+      css.rel = "stylesheet";
+      css.href = "https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Widgets/widgets.css";
+      css.crossOrigin = "anonymous";
+      css.integrity = SRI.cesiumCss;
+      document.head.appendChild(css);
+      await loadScript("https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Cesium.js", SRI.cesiumJs);
+      window.CESIUM_BASE_URL = "https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/";
+      await loadScript("https://cdn.jsdelivr.net/npm/ol-cesium@2.18.0/dist/olcs.js", SRI.olcs);
+      return true;
+    } catch (e) {
+      Toast.err("3D-Bibliotheken konnten nicht geladen werden.");
+      return false;
+    } finally {
+      loading = false;
+    }
+  }
+
+  function loadScript(src, integrity) {
+    return new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.crossOrigin = "anonymous";
+      if (integrity) s.integrity = integrity;
+      s.onload = res;
+      s.onerror = () => rej(new Error("Script load failed"));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function enable() {
+    const ok = await ensureLoaded();
+    if (!ok) return;
+    if (!ol3d) {
+      try {
+        ol3d = new window.olcs.OLCesium({ map, target: document.getElementById("map3d") });
+      } catch (e) {
+        Toast.err("3D-Initialisierung fehlgeschlagen.");
+        return;
+      }
+    }
+    ol3d.setEnabled(true);
+    document.getElementById("app").classList.add("mode-3d");
+    document.getElementById("btn-3d").setAttribute("aria-pressed", "true");
+    Permalink.scheduleUpdate();
+  }
+
+  function disable() {
+    if (ol3d) ol3d.setEnabled(false);
+    document.getElementById("app").classList.remove("mode-3d");
+    document.getElementById("btn-3d").setAttribute("aria-pressed", "false");
+    Permalink.scheduleUpdate();
+  }
+
+  function toggle() {
+    if (document.getElementById("app").classList.contains("mode-3d")) disable();
+    else enable();
+  }
+
+  return { enable, disable, toggle };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: Theme
+───────────────────────────────────────────────────────────────────────── */
+const Theme = (() => {
+  const KEY_ATTR = "data-theme";
+  function set(mode) {
+    if (mode === "auto") document.documentElement.removeAttribute(KEY_ATTR);
+    else document.documentElement.style.colorScheme = mode;
+  }
+  function toggle() {
+    const cur = getComputedStyle(document.documentElement).colorScheme;
+    const next = cur.includes("dark") ? "light" : "dark";
+    const apply = () => { document.documentElement.style.colorScheme = next; };
+    if (document.startViewTransition) document.startViewTransition(apply);
+    else apply();
+  }
+  return { toggle, set };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: Sortable wiring
+───────────────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: Treeview keyboard navigation (WAI-ARIA pattern, single-tab-stop)
+───────────────────────────────────────────────────────────────────────── */
+function wireTreeKeyboard() {
+  const tree = document.getElementById("tree");
+  function focusable() {
+    return [...tree.querySelectorAll('li.group > .row, li.layer > label')]
+      .filter(el => el.offsetParent !== null);
+  }
+  function setActive(el) {
+    focusable().forEach(n => n.tabIndex = -1);
+    el.tabIndex = 0;
+    el.focus();
+  }
+  // Initialise tabindex on every render
+  const obs = new MutationObserver(() => {
+    const items = focusable();
+    if (items.length === 0) return;
+    if (!items.some(i => i.tabIndex === 0)) {
+      items.forEach(n => n.tabIndex = -1);
+      items[0].tabIndex = 0;
+    }
+  });
+  obs.observe(tree, { childList: true, subtree: true });
+
+  tree.addEventListener("keydown", e => {
+    const items = focusable();
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement);
+    if (idx < 0) return;
+    const cur = items[idx];
+    const li = cur.closest("li");
+    switch (e.key) {
+      case "ArrowDown": e.preventDefault(); setActive(items[Math.min(idx + 1, items.length - 1)]); break;
+      case "ArrowUp":   e.preventDefault(); setActive(items[Math.max(idx - 1, 0)]); break;
+      case "Home":      e.preventDefault(); setActive(items[0]); break;
+      case "End":       e.preventDefault(); setActive(items[items.length - 1]); break;
+      case "ArrowRight":
+        if (li.classList.contains("group")) {
+          e.preventDefault();
+          if (li.getAttribute("aria-expanded") === "false") {
+            li.setAttribute("aria-expanded", "true");
+          } else {
+            // move into first child
+            const next = items[idx + 1];
+            if (next) setActive(next);
+          }
+        }
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        if (li.classList.contains("group") && li.getAttribute("aria-expanded") === "true") {
+          li.setAttribute("aria-expanded", "false");
+        } else {
+          // move to parent group row
+          const parentLi = li.parentElement?.closest("li.group");
+          if (parentLi) {
+            const parentRow = parentLi.querySelector(":scope > .row");
+            if (parentRow) setActive(parentRow);
+          }
+        }
+        break;
+      case "Enter":
+      case " ":
+        if (cur.matches(".row")) { e.preventDefault(); cur.click(); }
+        else if (cur.matches("label")) {
+          // Toggle the layer's checkbox without re-firing on the native
+          // label-click + checkbox-click cascade.
+          const box = cur.querySelector('input[type="checkbox"]');
+          if (box && !box.disabled) {
+            e.preventDefault();
+            box.checked = !box.checked;
+            box.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+        break;
+    }
+  });
+}
+
+function wireSortable() {
+  const list = document.getElementById("active-list");
+  new Sortable(list, {
+    animation: 150,
+    handle: ".grip",
+    ghostClass: "sortable-ghost",
+    chosenClass: "sortable-chosen",
+    onEnd: () => {
+      const ids = [...list.querySelectorAll(".active-item")].map(el => el.dataset.id);
+      ActiveLayers.reorder(ids);
+    }
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: focus trap (small)
+───────────────────────────────────────────────────────────────────────── */
+function trapFocus(container) {
+  const sel = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  function onKey(e) {
+    if (e.key !== "Tab") return;
+    const nodes = [...container.querySelectorAll(sel)].filter(n => !n.disabled && n.offsetParent !== null);
+    if (nodes.length === 0) return;
+    const first = nodes[0], last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+    else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+  }
+  container.addEventListener("keydown", onKey);
+}
+trapFocus(document.getElementById("token-dialog"));
+trapFocus(document.getElementById("import-dialog"));
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Wiring: top bar
+───────────────────────────────────────────────────────────────────────── */
+document.getElementById("btn-permalink").addEventListener("click", () => Permalink.copyToClipboard());
+document.getElementById("btn-3d").addEventListener("click", () => ThreeD.toggle());
+document.getElementById("btn-theme").addEventListener("click", () => Theme.toggle());
+
+document.getElementById("btn-export").addEventListener("click", () => {
+  const dlg = document.getElementById("export-dialog");
+  if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
+});
+document.getElementById("export-cancel").addEventListener("click", () => {
+  document.getElementById("export-dialog").close();
+});
+document.getElementById("export-png").addEventListener("click", () => {
+  document.getElementById("export-dialog").close();
+  ExportModule.pngFromMap();
+});
+document.getElementById("export-json").addEventListener("click", () => {
+  document.getElementById("export-dialog").close();
+  ExportModule.sessionJson();
+});
+
+document.getElementById("btn-import").addEventListener("click", () => {
+  const dlg = document.getElementById("import-dialog");
+  const file = document.getElementById("import-file");
+  file.value = "";
+  if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
+});
+document.getElementById("import-file").addEventListener("change", async e => {
+  const file = e.target.files?.[0];
+  if (file) await ExportModule.importSession(file);
+  document.getElementById("import-dialog").close();
+});
+document.getElementById("import-cancel").addEventListener("click", () => {
+  document.getElementById("import-dialog").close();
+});
+
+document.getElementById("search-input").addEventListener("input", e => {
+  UI.searchQuery = e.target.value;
+  UI.renderTree();
+});
+
+document.querySelectorAll('#filter-pane input[name="scope"]').forEach(r => {
+  r.addEventListener("change", () => {
+    UI.scopeAll = document.querySelector('#filter-pane input[name="scope"]:checked').value === "all";
+    UI.renderTree();
+  });
+});
+document.querySelectorAll('#filter-pane .type-filter input[type="checkbox"]').forEach(cb => {
+  cb.addEventListener("change", () => {
+    UI.filterTypes.clear();
+    document.querySelectorAll('#filter-pane .type-filter input[type="checkbox"]:checked')
+      .forEach(c => UI.filterTypes.add(c.dataset.type));
+    UI.renderTree();
+  });
+});
+
+document.getElementById("sidebar-toggle").addEventListener("click", () => {
+  document.getElementById("app").classList.toggle("sidebar-open");
+});
+document.getElementById("identify-toggle").addEventListener("change", e => {
+  Identify.setEnabled(e.target.checked);
+});
+document.getElementById("active-handle").addEventListener("click", () => {
+  const open = document.getElementById("app").classList.toggle("active-open");
+  document.getElementById("active-handle").setAttribute("aria-expanded", String(open));
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Boot
+───────────────────────────────────────────────────────────────────────── */
+(async function boot() {
+  Identify.init();
+  wireSortable();
+  wireTreeKeyboard();
+  try {
+    await Catalogs.loadIndex();
+  } catch (e) {
+    Toast.err(e.message);
+    return;
+  }
+  await UI.initCatalogDropdown();
+
+  const restored = await Permalink.restore();
+  if (!restored) {
+    const firstName = Catalogs.index[0]?.name;
+    if (firstName) await UI.switchCatalog(firstName);
+  }
+})();
+</script>
+</body>
+</html>
