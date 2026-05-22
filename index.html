@@ -7,7 +7,7 @@
 <meta http-equiv="Permissions-Policy" content="geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=()">
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-BIbJwFzs15iawf58j32Q+nNdYs0U3C5Mb/frrmLIXHc=';
+  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-yikW7lN3rVj+ZoG9mVSmNzf1Xyao2s2i0sqVqRchze4=';
   style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
   img-src 'self' data: blob: https: http:;
   font-src 'self';
@@ -82,11 +82,14 @@
   --sp-1: 0.25rem; --sp-2: 0.5rem; --sp-3: 0.75rem;
   --sp-4: 1rem;    --sp-5: 1.5rem; --sp-6: 2rem;
 
-  /* Radius / shadow */
+  /* Radius / shadow.
+     Directional offset (X≈Y) follows the cartographic convention of a
+     north-west light source — every floating surface throws its shadow
+     toward the south-east. Subtle but consistent across the whole UI. */
   --r-sm: 4px; --r-md: 6px; --r-lg: 8px;
-  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.08);
-  --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.12);
-  --shadow-lg: 0 12px 32px oklch(0% 0 0 / 0.18);
+  --shadow-sm: 1px 1px 2px oklch(0% 0 0 / 0.08);
+  --shadow-md: 3px 4px 12px oklch(0% 0 0 / 0.12);
+  --shadow-lg: 8px 12px 32px oklch(0% 0 0 / 0.18);
 
   /* Surfaces */
   --bg:        light-dark(oklch(98.5% 0.005 250), oklch(18% 0.012 260));
@@ -233,12 +236,165 @@ button { cursor: pointer; }
   border-radius: var(--r-md);
   transition: border-color var(--t-fast) var(--ease);
 }
+
+/* Geo-search pane: a third pane below "Suche" with input + dropdown
+   suggestions. Layout mirrors the existing Suche pane; the dropdown is
+   absolutely-positioned-down so it doesn't push the tree-pane around. */
+#geo-pane h2 {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+}
+#geo-pane h2 .link-btn {
+  background: transparent; border: none; padding: 0;
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#geo-pane h2 .link-btn:hover { color: var(--accent-hover); }
+
+/* Layer- and Geo-search panes: same collapsible header pattern as
+   #filter-pane (button-styled h2 + body div). Layer search shows the
+   active query as status text when collapsed so the user knows the
+   tree is still filtered; geo search has no persistent state to
+   surface, so no status. */
+#layer-search-pane h2 {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 0 var(--sp-3);
+}
+#layer-search-pane.collapsed h2,
+#geo-pane.collapsed h2 { margin-bottom: 0; }
+#layer-search-pane.collapsed #layer-search-body,
+#geo-pane.collapsed #geo-search-body { display: none; }
+.pane-status {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+  text-align: right;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  display: none;
+}
+#layer-search-pane.collapsed .pane-status:not(:empty) {
+  display: inline-block;
+}
+.geo-suggest {
+  list-style: none; padding: 0; margin: 4px 0 0;
+  max-height: 260px; overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+  display: none;
+}
+.geo-suggest.open { display: block; }
+.geo-suggest-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.35;
+  border-bottom: 1px solid var(--border);
+}
+.geo-suggest-item:last-child { border-bottom: none; }
+.geo-suggest-item:hover,
+.geo-suggest-item[aria-selected="true"] {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+/* Geo pin overlay — a teardrop-shaped SVG marker with a tooltip label
+   that always sits above the pin, anchored to it. The close-button lets
+   the user dismiss the pin once they're done looking at the location. */
+.geo-pin {
+  position: relative;
+  pointer-events: auto;
+  width: 28px; height: 28px;
+}
+.geo-pin svg {
+  display: block;
+  filter: drop-shadow(2px 3px 4px oklch(0% 0 0 / 0.35));
+}
+.geo-pin-close {
+  position: absolute;
+  top: -6px; right: -10px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  color: var(--fg);
+  font-size: 13px; line-height: 1;
+  cursor: pointer;
+  display: grid; place-items: center;
+  box-shadow: var(--shadow-sm);
+}
+.geo-pin-close:hover { background: var(--bg-hover); }
+.geo-pin-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 5px 9px;
+  font-size: 11px;
+  line-height: 1.35;
+  max-width: 260px;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+  color: var(--fg);
+}
+.geo-pin-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--border-strong);
+}
 #sidebar select:focus, #sidebar input:focus {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-#tree-pane { flex: 1 1 auto; overflow: auto; padding: var(--sp-2) var(--sp-2) var(--sp-4); }
+#tree-pane { flex: 1 1 auto; overflow: auto; padding: 0 var(--sp-2) var(--sp-4); }
+
+/* Tree-pane header strip with expand-all / collapse-all link buttons.
+   Placed as its own bar between Werkzeuge and tree-pane so it sits flush
+   under the Werkzeuge pane and stays visible without sticky positioning
+   (which left a confusing gap when the tree scrolled). */
+.tree-actions {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px 7px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.tree-actions .link-btn {
+  background: transparent; border: none; padding: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  transition: color var(--t-fast) var(--ease);
+}
+.tree-actions .link-btn:hover { color: var(--accent); }
+.tree-actions .link-btn:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+  border-radius: 2px;
+}
+.tree-actions .link-sep { color: var(--border-strong); }
 
 /* Sidebar tool toggles (Identify, …). Cursor switches to crosshair on the
    map while a click-tool is active so users see they're in a query mode. */
@@ -318,13 +474,34 @@ button { cursor: pointer; }
 .tree li.group[aria-expanded="false"] > ul { display: none; }
 
 .tree li.layer > label {
+  position: relative;
   display: flex; align-items: center; gap: var(--sp-2);
-  padding: 6px 8px; border-radius: var(--r-sm);
+  padding: 6px 8px 6px 12px;
+  border-radius: var(--r-sm);
   color: var(--fg);
   min-height: 32px;
   cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
 }
 .tree li.layer > label:hover { background: var(--bg-hover); }
+/* Active state must read at a glance — across 200+ catalogue rows the
+   checkbox tick is too small to scan. Left accent rule + soft tint + name
+   gets the accent colour. */
+.tree li.layer.active > label {
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+}
+.tree li.layer.active > label::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 6px; bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.tree li.layer.active .name {
+  color: var(--accent);
+  font-weight: 500;
+}
 .tree li.layer > label input[type="checkbox"] {
   accent-color: var(--accent);
   width: 16px; height: 16px;
@@ -355,6 +532,7 @@ button { cursor: pointer; }
 .svc-tag[data-type="ogc_vectorTiles"]    { --svc-h: 325; --svc-c: 0.14; } /* magenta */
 .svc-tag[data-type="ogc_wcs"]            { --svc-h: 50;  --svc-c: 0.14; } /* amber   */
 .svc-tag[data-type="web"]                { --svc-h: 0;   --svc-c: 0;    } /* grey    */
+.svc-tag[data-type="_base_osm"]          { --svc-h: 80;  --svc-c: 0.10; } /* warm sand */
 .svc-tag[data-type] {
   background:   oklch(96% var(--svc-c) var(--svc-h));
   color:        oklch(38% calc(var(--svc-c) * 1.6) var(--svc-h));
@@ -395,9 +573,89 @@ button { cursor: pointer; }
 #filter-pane .scope-toggle input { accent-color: var(--accent); margin-right: 6px; }
 #filter-pane .scope-toggle label { cursor: pointer; }
 
-/* Type filter: same .svc-tag chips as in the tree, with a clear
-   checked/unchecked affordance. Native checkbox is visually hidden but
-   remains focusable + announced by screen readers. */
+/* Filter-pane collapsible header: button-styled h2 with caret + status
+   row that surfaces the active filter state when the body is hidden.
+   Mirrors the #active-pane collapse pattern (chevron rotation, body
+   `display:none` when .collapsed) so the interaction reads the same
+   everywhere in the sidebar. */
+#filter-pane h2 {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 0 var(--sp-3);
+}
+#filter-pane.collapsed h2 { margin-bottom: 0; }
+#filter-pane.collapsed #filter-body { display: none; }
+.pane-toggle {
+  background: transparent; border: none; padding: 0;
+  color: inherit; font: inherit;
+  display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex: none;
+}
+.pane-toggle:hover { color: var(--fg); }
+.pane-toggle:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px;
+}
+.pane-toggle .caret {
+  width: 12px; height: 12px;
+  flex: none;
+  transition: transform var(--t-fast) var(--ease);
+}
+#filter-pane.collapsed .pane-toggle .caret { transform: rotate(-90deg); }
+
+/* Status row: hidden when filter-pane is open (body shows full controls),
+   visible when collapsed. Mini-chip badges reuse .svc-tag's data-type
+   colour vars but skip border/padding to stay compact at 11px. */
+.filter-status {
+  display: none;
+  margin-left: auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  justify-content: flex-end;
+}
+#filter-pane.collapsed .filter-status { display: inline-flex; }
+.filter-status .mini-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  background: oklch(96% var(--svc-c) var(--svc-h));
+  color:      oklch(38% calc(var(--svc-c) * 1.6) var(--svc-h));
+  flex: none;
+}
+@media (prefers-color-scheme: dark) {
+  .filter-status .mini-chip {
+    background: oklch(28% calc(var(--svc-c) * 1.2) var(--svc-h));
+    color:      oklch(82% calc(var(--svc-c) * 1.4) var(--svc-h));
+  }
+}
+.filter-status .scope-mini {
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex: none;
+}
+.filter-status .more {
+  font-size: 10px;
+  color: var(--fg-muted);
+  flex: none;
+}
+
+/* Type filter: same .svc-tag hues as in the tree, but as a true two-state
+   toggle. Unchecked = transparent fill + dashed type-coloured border
+   (reads as "off, still clickable"). Checked = solid fill (matches the
+   tree-badge style — same visual = same family).
+   Earlier opacity-fade-when-unchecked was misread as "disabled". */
 #filter-pane .type-filter {
   display: flex; flex-wrap: wrap; gap: 6px;
 }
@@ -405,17 +663,37 @@ button { cursor: pointer; }
   cursor: pointer;
   user-select: none;
   position: relative;
-  opacity: 0.4;
-  filter: saturate(0.5);
   padding: 4px 9px;
-  transition: opacity var(--t-fast) var(--ease),
-              filter var(--t-fast) var(--ease),
+  background: transparent;
+  color: oklch(48% calc(var(--svc-c) * 1.4) var(--svc-h));
+  border-color: oklch(72% var(--svc-c) var(--svc-h));
+  border-style: dashed;
+  transition: background var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease),
+              color var(--t-fast) var(--ease),
               transform var(--t-fast) var(--ease);
+}
+#filter-pane .type-filter label.svc-tag[data-type="web"] {
+  color: var(--fg-muted);
+  border-color: var(--border-strong);
 }
 #filter-pane .type-filter label.svc-tag:hover { transform: translateY(-1px); }
 #filter-pane .type-filter label.svc-tag:has(input:checked) {
-  opacity: 1;
-  filter: none;
+  background:   oklch(96% var(--svc-c) var(--svc-h));
+  color:        oklch(38% calc(var(--svc-c) * 1.6) var(--svc-h));
+  border-color: oklch(78% var(--svc-c) var(--svc-h));
+  border-style: solid;
+}
+@media (prefers-color-scheme: dark) {
+  #filter-pane .type-filter label.svc-tag {
+    color: oklch(72% calc(var(--svc-c) * 1.4) var(--svc-h));
+    border-color: oklch(44% var(--svc-c) var(--svc-h));
+  }
+  #filter-pane .type-filter label.svc-tag:has(input:checked) {
+    background:   oklch(28% calc(var(--svc-c) * 1.2) var(--svc-h));
+    color:        oklch(82% calc(var(--svc-c) * 1.4) var(--svc-h));
+    border-color: oklch(44% var(--svc-c) var(--svc-h));
+  }
 }
 #filter-pane .type-filter label.svc-tag input {
   position: absolute;
@@ -470,6 +748,13 @@ button { cursor: pointer; }
   padding: var(--sp-5) var(--sp-4); text-align: center;
   color: var(--fg-muted); font-size: 13px;
 }
+.tree-empty svg {
+  display: block;
+  margin: 0 auto var(--sp-3);
+  width: 48px; height: 48px;
+  color: var(--fg-soft);
+  opacity: 0.7;
+}
 
 /* ── Active layers panel ───────────────────────────────────────────────── */
 #active-pane {
@@ -480,11 +765,18 @@ button { cursor: pointer; }
 }
 #active-list { padding: var(--sp-2); margin: 0; list-style: none; overflow: auto; flex: 1; }
 
-/* Compact mini-list: one row per layer, grip + eye + name + status + ×.
-   Heavier controls (opacity slider, zoom-to-layer) live inline in the tree. */
+/* Compact mini-list: grip + eye + name + legend + status + ×.
+   Heavier controls (opacity slider, zoom-to-layer) live inline in the tree.
+   A second grid row is reserved for the expanded-legend content; it stays
+   collapsed until the user clicks the legend toggle. */
 .active-item {
   display: grid;
-  grid-template-columns: auto auto 1fr auto auto;
+  /* Spalten: grip, eye, name (1fr), legend, trunc-badge, copyright,
+     status, ×. Acht Spalten zwingen die Zeile zu bleiben — vorher
+     waren es nur sechs und die zwei neuen Badges (Trunc + ©) sind
+     in eine zweite Zeile gerutscht. */
+  grid-template-columns: auto auto 1fr auto auto auto auto auto;
+  grid-template-rows: auto auto;
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
@@ -492,6 +784,43 @@ button { cursor: pointer; }
   border-radius: var(--r-sm);
   cursor: grab;
   min-height: 30px;
+}
+.active-item .active-legend {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 8px 6px 30px;
+  margin-top: 4px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+}
+.active-item.legend-open .active-legend { display: flex; }
+.active-item .active-legend img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: white;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-sm);
+}
+.active-item .active-legend .legend-loading,
+.active-item .active-legend .legend-empty {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+.active-item .icon-btn.legend:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+.active-item .icon-btn.legend[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .active-item + .active-item { border-top: 1px solid var(--border); }
 .active-item:hover { background: var(--bg-hover); }
@@ -526,43 +855,16 @@ button { cursor: pointer; }
   padding: var(--sp-4); text-align: center; color: var(--fg-muted); font-size: 12px;
 }
 
-/* Pinned base-layer entry: always last in the active list, no grip / no
-   remove, but vis-toggle + opacity slider so the user can fade it like any
-   other theme. Two-row layout so the slider has horizontal space. */
-.active-item.base-item {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  cursor: default;
-  border-top: 1px solid var(--border-strong);
-  margin-top: 4px;
-  padding-top: 6px;
-}
-.active-item.base-item:hover { background: transparent; }
-.active-item.base-item .head-row {
-  display: flex; align-items: center; gap: 6px;
-  min-height: 26px;
-}
-.active-item.base-item .name { font-size: 12px; flex: 1; }
-.active-item.base-item .opacity-row {
-  display: flex; align-items: center; gap: 6px;
-  padding-left: 30px;
-  font-size: 11px;
+/* Synthetic tree branch ("Hintergrund") — styled like a country group but
+   with a muted label colour so the user sees it as system-supplied rather
+   than catalogue-supplied. */
+.tree li.group.synthetic-branch > .row {
   color: var(--fg-muted);
+  font-style: italic;
 }
-.active-item.base-item .opacity-row input[type=range] {
-  flex: 1; accent-color: var(--accent); min-width: 0;
+.tree li.group.synthetic-branch > .row span {
+  letter-spacing: 0.02em;
 }
-.active-item.base-item .opacity-row .op-val {
-  font-variant-numeric: tabular-nums;
-  min-width: 32px;
-  text-align: right;
-}
-.active-item.base-item.hidden-layer .name {
-  color: var(--fg-soft); text-decoration: line-through;
-}
-.active-item.base-item.hidden-layer .vis { color: var(--fg-soft); }
 
 /* ── Map ───────────────────────────────────────────────────────────────── */
 #map-wrap {
@@ -599,6 +901,245 @@ button { cursor: pointer; }
   outline: 2px solid var(--accent) !important;
 }
 .ol-zoom { top: var(--sp-3); left: var(--sp-3); background: transparent; }
+
+/* Scale readout. Sits below the +/- buttons, refreshed by JS on view
+   change. Tabular numerals keep the readout from jittering as the
+   denominator changes width. */
+#zoom-chip {
+  position: absolute;
+  top: calc(var(--sp-3) + 78px);
+  left: calc(var(--sp-3) + 2px);
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 4px 8px;
+  background: color-mix(in oklch, var(--bg-elev) 90%, transparent);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow: var(--shadow-sm);
+}
+#zoom-chip .z-scale { font-weight: 500; }
+
+/* Mouse-position coord chip, anchored bottom-right above OL attribution.
+   WGS84-only by design — UTM is offered in the Identify popup instead of
+   as permanent chrome. */
+#coord-chip {
+  position: absolute;
+  bottom: calc(var(--sp-3) + 28px); /* above OL attribution (~24px tall) */
+  right: var(--sp-3);
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 4px 8px;
+  background: color-mix(in oklch, var(--bg-elev) 90%, transparent);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow: var(--shadow-sm);
+}
+#coord-chip .c-coord { font-weight: 500; min-width: 11ch; text-align: right; display: inline-block; }
+
+/* Map-action toolbar: compact bottom-left bar with Identify (mirrors the
+   sidebar Werkzeuge toggle so the tool is reachable even when the sidebar
+   is collapsed), Reset View, and Clear-Themes. Same surface tokens as the
+   zoom/coord chips so the three controls visually belong together. */
+#map-toolbar {
+  position: absolute;
+  bottom: var(--sp-3);
+  left: var(--sp-3);
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: color-mix(in oklch, var(--bg-elev) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+  z-index: 6;
+}
+.map-tool-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.map-tool-btn svg { width: 14px; height: 14px; flex: none; }
+.map-tool-btn:hover { background: var(--bg-hover); color: var(--fg); }
+.map-tool-btn:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.map-tool-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+@media (pointer: coarse) {
+  .map-tool-btn { min-height: 36px; padding: 6px 10px; }
+}
+
+/* Truncation badge on .active-item: tiny amber pill that surfaces the
+   "warnedTruncation" flag of the layer source long after the toast has
+   faded. Updated in-place by SourceFactory.buildWFS/buildOgcApiFeatures
+   via _setActiveItemTruncation() so re-pans within the same layer keep
+   the badge accurate without rebuilding the whole active list. */
+.active-item .trunc-badge {
+  display: inline-flex; align-items: center;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--warn) 18%, transparent);
+  color: var(--warn);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex: none;
+}
+.active-item .trunc-badge[hidden] { display: none; }
+
+/* Copyright/license icon in active-item: only shown when a layer has
+   resolved meaningful attribution (more than just hostname). Click
+   opens the floating #attribution-popover. */
+.active-item .copyright-btn {
+  width: 22px; height: 22px;
+  color: var(--fg-soft);
+}
+.active-item .copyright-btn svg { width: 14px; height: 14px; }
+.active-item .copyright-btn:hover { color: var(--accent); }
+.active-item .copyright-btn[hidden] { display: none; }
+
+#attribution-popover {
+  position: absolute;
+  display: none;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--sp-3);
+  font-size: 12px;
+  color: var(--fg);
+  max-width: 320px;
+  z-index: 60;
+  line-height: 1.4;
+}
+#attribution-popover.open { display: block; }
+#attribution-popover .popover-arrow {
+  position: absolute;
+  width: 10px; height: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-right: none;
+  border-bottom: none;
+  z-index: -1;
+}
+#attribution-popover .popover-body strong {
+  display: block;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 4px;
+}
+#attribution-popover .popover-body .license {
+  display: block;
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-top: 6px;
+}
+#attribution-popover .popover-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#attribution-popover .popover-body a:hover { color: var(--accent-hover); }
+
+/* Identify popup footer: click-coordinate strip pinned to the popup base.
+   Distinct surface tone (--bg-elev-2) + top border so it reads as a
+   status bar — not as random text floating beneath the body. Horizontal
+   padding matches the body (var(--sp-3)) so the row visually aligns with
+   the table content above when both are shown. */
+#popup-footer:empty { display: none; }
+.identify-footer {
+  background: var(--bg-elev-2);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  padding: var(--sp-2) var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-color-scheme: dark) {
+  .identify-footer {
+    background: color-mix(in oklch, var(--bg-elev) 60%, var(--bg) 40%);
+  }
+}
+.identify-footer .coord-row {
+  display: flex; align-items: center; gap: var(--sp-2);
+  min-height: 28px;
+}
+.identify-footer .coord-row .lbl {
+  color: var(--fg-muted);
+  font-weight: 500;
+  flex: none;
+  min-width: 44px;
+}
+.identify-footer .coord-row code {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: transparent;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.identify-footer .copy-btn-icon {
+  background: transparent; border: none;
+  width: 32px; height: 32px;
+  border-radius: var(--r-sm);
+  color: var(--fg-soft);
+  cursor: pointer;
+  display: inline-grid; place-items: center;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  flex: none;
+}
+.identify-footer .copy-btn-icon svg { width: 16px; height: 16px; }
+.identify-footer .copy-btn-icon:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+.identify-footer .copy-btn-icon:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+/* Paper-grain overlay: an inline turbulence SVG dialled to a faint
+   multiply-blend stipple. Adds editorial cartographic texture without a
+   network request. pointer-events:none keeps the map fully interactive. */
+#map-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.45 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  mix-blend-mode: multiply;
+  opacity: 0.05;
+  z-index: 4;
+}
+@media (prefers-color-scheme: dark) {
+  #map-wrap::after { mix-blend-mode: screen; opacity: 0.035; }
+}
+
 .ol-attribution {
   background: color-mix(in oklch, var(--bg-elev) 88%, transparent) !important;
   color: var(--fg-muted) !important;
@@ -627,6 +1168,37 @@ button { cursor: pointer; }
   z-index: 50;
 }
 #popup.open { display: flex; }
+/* Compact mode: empty / error / "no hit" state. Inline hint sits in the
+   header next to the close button instead of stretching out a full empty
+   body, so the popup shrinks to a single status row + coord-strip. */
+#popup.compact { min-width: 180px; }
+#popup.compact .tabs { display: none; }
+#popup.compact #popup-body { display: none; }
+#popup.compact .popup-head { border-bottom: none; }
+.popup-hint {
+  display: none;
+  flex: 1;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-style: italic;
+  padding: 0 var(--sp-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#popup.compact .popup-hint { display: inline-block; }
+/* Visual caret toward the click coordinate — Floating UI sets the
+   transform-relative offset via the arrow middleware. The diamond reuses
+   the popup chrome so it inherits dark/light styling for free. */
+#popup .popup-arrow {
+  position: absolute;
+  width: 10px; height: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-right: none;
+  border-bottom: none;
+  z-index: -1;
+}
 #popup .popup-head {
   display: flex; align-items: center; gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
@@ -661,7 +1233,12 @@ button { cursor: pointer; }
   word-break: break-word;
 }
 #popup th { color: var(--fg-muted); font-weight: 500; width: 40%; }
-#popup .empty { color: var(--fg-muted); text-align: center; padding: var(--sp-4); }
+#popup .empty {
+  color: var(--fg-muted); text-align: center;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 12px;
+  font-style: italic;
+}
 
 /* ── Dialog ────────────────────────────────────────────────────────────── */
 dialog {
@@ -724,8 +1301,26 @@ label.field input:focus {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Mobile ────────────────────────────────────────────────────────────── */
-#sidebar-toggle, #active-handle { display: none; }
+/* ── Sidebar + Active-Pane collapse on desktop ─────────────────────────── */
+#sidebar-toggle { display: inline-grid; }   /* visible on all sizes */
+#active-handle { display: none; }            /* mobile-only (set in @media) */
+.active-pane-header { display: none; }       /* desktop-only (set in @media) */
+
+@media (min-width: 768px) {
+  /* Sidebar collapses to zero width on desktop, smooth transition.
+     localStorage persists the choice across reloads. */
+  #app {
+    transition: grid-template-columns var(--t-med) var(--ease);
+  }
+  #app.sidebar-collapsed {
+    grid-template-columns: 0 1fr;
+  }
+  #app.sidebar-collapsed #sidebar {
+    transform: translateX(-100%);
+    visibility: hidden;
+  }
+  #sidebar { transition: transform var(--t-med) var(--ease); }
+}
 
 @media (max-width: 767px) {
   #app {
@@ -797,10 +1392,43 @@ label.field input:focus {
     box-shadow: var(--shadow-md);
     overflow: hidden;
     z-index: 10;
+    transition: max-height var(--t-med) var(--ease);
   }
   /* JS toggles .empty when there are no active layers — this avoids
      depending on `:has()` and survives older browser caches. */
   #active-pane.empty { display: none; }
+
+  /* Desktop-only title bar with collapse chevron. Mobile uses the
+     swipe-handle (#active-handle) instead. */
+  .active-pane-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev-2);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+  #active-collapse-toggle {
+    width: 22px; height: 22px;
+    display: inline-grid; place-items: center;
+    background: transparent; border: none;
+    color: var(--fg-soft); cursor: pointer;
+    border-radius: var(--r-sm);
+  }
+  #active-collapse-toggle:hover { background: var(--bg-hover); color: var(--fg); }
+  #active-collapse-toggle:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  #active-collapse-toggle svg {
+    width: 14px; height: 14px;
+    transition: transform var(--t-fast) var(--ease);
+  }
+  #active-pane.collapsed #active-collapse-toggle svg { transform: rotate(-90deg); }
+  #active-pane.collapsed #active-list { display: none; }
+  #active-pane.collapsed { max-height: 36px; }
 }
 
 /* Touch target sizing */
@@ -820,9 +1448,15 @@ label.field input:focus {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6h18M3 12h18M3 18h18" stroke-linecap="round"/></svg>
     </button>
     <div class="brand" aria-label="GeoBasis_Viewer (GBV)">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8">
-        <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke-linejoin="round"/>
-        <path d="M3 7l9 5 9-5M12 12v10" stroke-linejoin="round"/>
+      <!-- Compass-rose + dashed graticule. Filled north needle uses the
+           topbar accent colour; the southern half is muted. The dashed
+           meridian + parallel hint at a coordinate grid. -->
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M3 12h18M12 3v18" stroke-dasharray="1 2.2" opacity="0.45" stroke-linecap="round"/>
+        <path d="M12 5.5l3.2 7.2H8.8z" fill="currentColor" stroke="none"/>
+        <path d="M12 12.7l-2.6 5.8h5.2z" fill="currentColor" stroke="none" opacity="0.32"/>
+        <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/>
       </svg>
       <span>GeoBasis_Viewer (GBV)</span>
     </div>
@@ -831,11 +1465,14 @@ label.field input:focus {
     <button class="icon-btn" id="btn-permalink" aria-label="Permalink kopieren" title="Permalink kopieren">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" stroke-linecap="round"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" stroke-linecap="round"/></svg>
     </button>
+    <!-- Export = state leaves the app: arrow up, out of the tray.
+         Import = state enters the app: arrow down, into the tray.
+         Previous build had the two SVGs reversed. -->
     <button class="icon-btn" id="btn-export" aria-label="Exportieren" title="Exportieren">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15V3m0 0 4 4m-4-4-4 4M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <button class="icon-btn" id="btn-import" aria-label="Importieren" title="Importieren">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21V9m0 0 4 4m-4-4-4 4M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <button class="icon-btn" id="btn-3d" aria-pressed="false" aria-label="3D umschalten" title="2D / 3D">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" font-family="ui-sans-serif"><text x="12" y="16" text-anchor="middle" font-size="11" fill="currentColor" stroke="none">3D</text><rect x="3" y="4" width="18" height="16" rx="2"/></svg>
@@ -850,24 +1487,64 @@ label.field input:focus {
       <h2>Katalog</h2>
       <select id="catalog-select" aria-label="Katalog auswählen"></select>
     </div>
-    <div class="pane">
-      <h2>Suche</h2>
-      <input type="search" id="search-input" placeholder="Layer suchen…" autocomplete="off">
+    <div class="pane" id="layer-search-pane">
+      <h2>
+        <button type="button" id="layer-search-toggle" class="pane-toggle"
+                aria-expanded="true" aria-controls="layer-search-body"
+                aria-label="Layer-Suche ein-/ausklappen">
+          <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Layer suchen</span>
+        </button>
+        <span class="pane-status" id="layer-search-status" aria-hidden="true"></span>
+      </h2>
+      <div id="layer-search-body">
+        <input type="search" id="search-input" placeholder="Layer suchen…" autocomplete="off">
+      </div>
+    </div>
+    <div class="pane" id="geo-pane">
+      <h2>
+        <button type="button" id="geo-toggle" class="pane-toggle"
+                aria-expanded="true" aria-controls="geo-search-body"
+                aria-label="Ortssuche ein-/ausklappen">
+          <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Ort suchen</span>
+        </button>
+        <button type="button" class="link-btn" id="geo-settings-btn" title="Geo-Suche konfigurieren">Einstellungen</button>
+      </h2>
+      <div id="geo-search-body">
+        <input type="search" id="geo-input" placeholder="Adresse, Ort, PLZ…"
+               autocomplete="off"
+               role="combobox"
+               aria-expanded="false"
+               aria-controls="geo-suggest"
+               aria-autocomplete="list">
+        <ul id="geo-suggest" class="geo-suggest" role="listbox" aria-label="Vorschläge"></ul>
+      </div>
     </div>
     <div class="pane" id="filter-pane">
-      <h2>Filter</h2>
-      <div class="scope-toggle" role="radiogroup" aria-label="Suchbereich">
-        <label><input type="radio" name="scope" value="current" checked> Aktueller Katalog</label>
-        <label><input type="radio" name="scope" value="all"> Alle Kataloge</label>
-      </div>
-      <div class="type-filter" role="group" aria-label="Datentypen">
-        <label class="svc-tag" data-type="ogc_wms"><input type="checkbox" data-type="ogc_wms" checked> WMS</label>
-        <label class="svc-tag" data-type="ogc_wmts"><input type="checkbox" data-type="ogc_wmts" checked> WMTS</label>
-        <label class="svc-tag" data-type="ogc_wfs"><input type="checkbox" data-type="ogc_wfs" checked> WFS</label>
-        <label class="svc-tag" data-type="ogc_api_features"><input type="checkbox" data-type="ogc_api_features" checked> OGC API</label>
-        <label class="svc-tag" data-type="ogc_vectorTiles"><input type="checkbox" data-type="ogc_vectorTiles" checked> Vector Tiles</label>
-        <label class="svc-tag" data-type="ogc_wcs"><input type="checkbox" data-type="ogc_wcs"> WCS</label>
-        <label class="svc-tag" data-type="web"><input type="checkbox" data-type="web"> URL</label>
+      <h2>
+        <button type="button" id="filter-toggle" class="pane-toggle"
+                aria-expanded="true" aria-controls="filter-body"
+                aria-label="Filter ein-/ausklappen">
+          <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Filter</span>
+        </button>
+        <span class="filter-status" id="filter-status" aria-hidden="true"></span>
+      </h2>
+      <div id="filter-body">
+        <div class="scope-toggle" role="radiogroup" aria-label="Suchbereich">
+          <label><input type="radio" name="scope" value="current" checked> Aktueller Katalog</label>
+          <label><input type="radio" name="scope" value="all"> Alle Kataloge</label>
+        </div>
+        <div class="type-filter" role="group" aria-label="Datentypen">
+          <label class="svc-tag" data-type="ogc_wms"><input type="checkbox" data-type="ogc_wms" checked> WMS</label>
+          <label class="svc-tag" data-type="ogc_wmts"><input type="checkbox" data-type="ogc_wmts" checked> WMTS</label>
+          <label class="svc-tag" data-type="ogc_wfs"><input type="checkbox" data-type="ogc_wfs" checked> WFS</label>
+          <label class="svc-tag" data-type="ogc_api_features"><input type="checkbox" data-type="ogc_api_features" checked> OGC API</label>
+          <label class="svc-tag" data-type="ogc_vectorTiles"><input type="checkbox" data-type="ogc_vectorTiles" checked> Vector Tiles</label>
+          <label class="svc-tag" data-type="ogc_wcs"><input type="checkbox" data-type="ogc_wcs"> WCS</label>
+          <label class="svc-tag" data-type="web"><input type="checkbox" data-type="web"> URL</label>
+        </div>
       </div>
     </div>
     <div class="pane" id="tools-pane">
@@ -876,6 +1553,11 @@ label.field input:focus {
         <input type="checkbox" id="identify-toggle">
         <span>Informationsabfrage</span>
       </label>
+    </div>
+    <div class="tree-actions" role="group" aria-label="Themenbaum-Aktionen">
+      <button type="button" class="link-btn" id="tree-expand-all" aria-controls="tree">Alle aufklappen</button>
+      <span class="link-sep">·</span>
+      <button type="button" class="link-btn" id="tree-collapse-all" aria-controls="tree">Alle zuklappen</button>
     </div>
     <div id="tree-pane">
       <ul class="tree" id="tree" role="tree" aria-label="Themen"></ul>
@@ -889,17 +1571,63 @@ label.field input:focus {
 
     <div id="active-pane" class="empty" aria-label="Aktive Layer">
       <button id="active-handle" type="button" aria-expanded="false" aria-controls="active-list"><span>Aktive Layer</span></button>
+      <div class="active-pane-header">
+        <span class="active-pane-title">Aktive Layer</span>
+        <button type="button" id="active-collapse-toggle" aria-expanded="true" aria-controls="active-list" aria-label="Liste einklappen" title="Einklappen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
       <ul id="active-list" role="list"></ul>
     </div>
 
+    <div id="zoom-chip" aria-live="polite">
+      <span class="z-scale">–</span>
+    </div>
+
+    <div id="coord-chip" aria-live="polite" title="Mausposition (WGS84)">
+      <span class="c-coord">–</span>
+    </div>
+
+    <div id="map-toolbar" role="toolbar" aria-label="Karten-Werkzeuge">
+      <button type="button" id="btn-identify-map" class="map-tool-btn" aria-pressed="false" title="Informationsabfrage (Klick in die Karte)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 8h.01M11 12h1v5h1" stroke-linecap="round"/>
+        </svg>
+        <span>Info</span>
+      </button>
+      <button type="button" id="btn-reset-view" class="map-tool-btn" title="Auf Themen / Deutschland zoomen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="m3 12 9-9 9 9M5 10v10h14V10" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+        <span>Ansicht</span>
+      </button>
+      <button type="button" id="btn-clear-themes" class="map-tool-btn" title="Alle Themen-Layer entfernen (Hintergrund bleibt)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M6 7h12M9 7V5h6v2M8 7l1 13h6l1-13" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Leeren</span>
+      </button>
+    </div>
+
     <div id="popup" role="dialog" aria-label="Feature-Information">
+      <div class="popup-arrow" aria-hidden="true"></div>
       <div class="popup-head">
+        <span class="popup-hint" id="popup-hint" hidden></span>
         <div class="tabs" role="tablist" id="popup-tabs"></div>
         <button class="icon-btn" id="popup-close" aria-label="Schließen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18" stroke-linecap="round"/></svg>
         </button>
       </div>
       <div class="body" id="popup-body"></div>
+      <div id="popup-footer"></div>
+    </div>
+
+    <!-- Global per-layer attribution / license popover. Position is
+         re-computed via Floating UI each time .open() is called. -->
+    <div id="attribution-popover" role="dialog" aria-label="Lizenz und Quelle">
+      <div class="popover-arrow" aria-hidden="true"></div>
+      <div class="popover-body"></div>
     </div>
   </section>
 </div>
@@ -930,6 +1658,34 @@ label.field input:focus {
     <button class="btn" id="export-cancel">Abbrechen</button>
     <button class="btn" id="export-json">Sitzung als JSON</button>
     <button class="btn primary" id="export-png">Karte als PNG</button>
+  </div>
+</dialog>
+
+<!-- Geocoder settings dialog -->
+<dialog id="geo-settings-dlg" aria-labelledby="geo-settings-title">
+  <div class="head" id="geo-settings-title">Geo-Suche konfigurieren</div>
+  <div class="body">
+    <label class="field">
+      Anbieter
+      <select id="geo-provider">
+        <option value="photon">Photon (Komoot, OSM) — kein Token nötig</option>
+        <option value="bkg">BKG Geokodierung (DE) — UUID erforderlich</option>
+      </select>
+    </label>
+    <label class="field" id="geo-uuid-row">
+      BKG-UUID
+      <input type="text" id="geo-uuid" placeholder="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" autocomplete="off">
+    </label>
+    <p style="margin:0; font-size:11px; color:var(--fg-muted); line-height:1.45;">
+      Photon ist sofort einsatzbereit, sendet Anfragen aber an
+      photon.komoot.io (DSGVO-Hinweis im Impressum erforderlich). Für
+      die UUID kostenlos anfragen bei
+      <a href="mailto:dlz@bkg.bund.de?subject=GBV%20Geokodierung%20UUID&amp;body=Sehr%20geehrte%20Damen%20und%20Herren,%0A%0Aich%20beantrage%20eine%20UUID%20f%C3%BCr%20den%20BKG-Geokodierungsdienst%20zur%20nicht-kommerziellen%20Nutzung%20in%20GeoBasis_Viewer%20(GBV).%0A%0AMit%20freundlichen%20Gr%C3%BC%C3%9Fen" style="color:var(--accent);">dlz@bkg.bund.de</a>.
+    </p>
+  </div>
+  <div class="actions">
+    <button class="btn" id="geo-settings-cancel">Abbrechen</button>
+    <button class="btn primary" id="geo-settings-save">Speichern</button>
   </div>
 </dialog>
 
@@ -1024,13 +1780,32 @@ function parseUri(uri) {
   // Quoted keys may contain dashes/colons (`http-header:referer`). Decoding
   // is per-field with try/catch so a malformed value can't crash the parser
   // and abort the tree render — bad fields just stay as the raw substring.
+  //
+  // Multi-valued WMS keys (`layers`, `styles`) appear in real catalogue
+  // entries as repeated `layers=21&layers=25&layers=19`. The WMS spec
+  // expects comma-joined `LAYERS=21,25,19` and OL's ImageWMS source passes
+  // the catalogue value through unchanged, so a naïve last-wins overwrite
+  // silently drops every sublayer except the last. Concrete real-world
+  // breakage: HH ALKIS Flurstücke shipped only layer 19 (Flurstuecks-
+  // umringe) without 21 (Zuordnungspfeil) or 25 (FST-Nr.-Beschriftung).
   const out = {};
   if (typeof uri !== "string") return out;
   const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+  const MULTI_KEYS = new Set(["layers", "Layers", "LAYERS", "styles", "Styles", "STYLES"]);
+  function setKV(k, v) {
+    if (MULTI_KEYS.has(k) && k in out) {
+      // Always concatenate, even when an existing value is an empty
+      // string — `styles=&styles=&styles=` legitimately means three
+      // empty styles (one per layer in the matching LAYERS list).
+      out[k] = out[k] + "," + v;
+    } else {
+      out[k] = v;
+    }
+  }
 
   const quoted = [...uri.matchAll(/([\w:.\-]+)\s*=\s*'([^']*)'/g)];
   if (quoted.length > 0) {
-    for (const m of quoted) out[m[1]] = m[2];
+    for (const m of quoted) setKV(m[1], m[2]);
     return out;
   }
 
@@ -1039,7 +1814,7 @@ function parseUri(uri) {
     if (eq < 0) { out[safeDecode(part)] = ""; continue; }
     const k = safeDecode(part.slice(0, eq));
     const v = safeDecode(part.slice(eq + 1));
-    out[k] = v;
+    setKV(k, v);
   }
   return out;
 }
@@ -1059,11 +1834,39 @@ function isBlockedHost(host) {
   if (!host) return true;
   const h = host.toLowerCase();
   if (h === "localhost" || h.endsWith(".localhost")) return true;
+  // .local is mDNS / Bonjour — used by intranet metadata endpoints.
+  if (h === "local" || h.endsWith(".local")) return true;
   if (h === "0.0.0.0" || h === "[::]" || h === "::" || h === "[::1]" || h === "::1") return true;
 
-  // IPv4 dotted-quad?
+  // ── Non-canonical IPv4 spellings the browser still resolves but a
+  //    strict dotted-quad regex would miss. Catalogue services are
+  //    domain-named in practice; a raw-numeric host is almost certainly
+  //    an SSRF probe via a legacy IP encoding. Reject every form.
+  //    Examples covered:
+  //      2130706433              → 127.0.0.1 (decimal IPv4)
+  //      0x7f000001              → 127.0.0.1 (hex IPv4)
+  //      017700000001            → 127.0.0.1 (octal IPv4)
+  //      127.1                   → 127.0.0.1 (shorthand 2-octet)
+  //      127.0.1                 → 127.0.0.1 (shorthand 3-octet)
+  //      0177.0.0.1              → 127.0.0.1 (octal octet)
+  //      0x7f.0.0.1              → 127.0.0.1 (hex octet)
+  if (/^\d+$/.test(h)) return true;                          // single decimal int
+  if (/^0x[0-9a-f]+$/.test(h)) return true;                  // single hex int
+  if (/(?:^|\.)0x[0-9a-f]+(?:\.|$)/.test(h)) return true;    // any 0x-prefixed segment
+  if (/^\d{1,12}(?:\.\d{1,12}){1,2}$/.test(h)) return true;  // 2- or 3-octet shorthand
+  // Octal-octet 4-quad: at least one segment has a leading-zero longer
+  // than one character (e.g. "0177.0.0.1" → 127.0.0.1). The strict
+  // dotted-quad regex below limits each segment to 3 chars, so it would
+  // never match — catch the octal form here BEFORE the strict match.
+  if (/^\d{1,4}(?:\.\d{1,4}){3}$/.test(h) &&
+      h.split(".").some(s => s.length > 1 && s[0] === "0")) return true;
+
+  // IPv4 dotted-quad (canonical four-octet form)
   const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (m) {
+    // Reject octal traps: any octet with a leading zero
+    // (0177.0.0.1 reaches 127.0.0.1 in some resolvers).
+    if (m.slice(1).some(s => s.length > 1 && s[0] === "0")) return true;
     const oct = m.slice(1).map(n => parseInt(n, 10));
     if (oct.some(n => n < 0 || n > 255)) return true;
     const [a, b] = oct;
@@ -1316,6 +2119,53 @@ function safeHtml(raw) {
 const CATALOG_BASE = "https://raw.githubusercontent.com/geoObserver/geobasis_loader/main/kataloge/";
 const CATALOG_INDEX = CATALOG_BASE + "GeoBasis_Loader_v6_Kataloge.json";
 
+/* Catalogue type corrections — some upstream entries declare a service
+   type that doesn't match the actual server. Applied once at load time
+   so the tree-render, filter chips, badge, and ActiveLayers dispatch
+   all see the corrected type without per-call branching.
+
+   Current overrides:
+   - geodienste.halle.de/opendata/<UUID>: 20 Halle entries are tagged
+     ogc_wmts but the URI carries no {z}/{x}/{y} template and the
+     endpoint serves real WMS Capabilities. Forcing the type fixes
+     buildWMTS Capabilities-load 404s; the XYZ-template Halle entry
+     (Amtl. Stadtplan) keeps its ogc_wmts type because parseUri
+     resolves it through the type=xyz / {z}-template detection in
+     SourceFactory.buildWMTS itself. */
+function applyCatalogOverrides(data) {
+  function walk(o) {
+    if (!o || typeof o !== "object") return;
+    // Two-stage HAL override:
+    // 1) ogc_wmts → ogc_wms for entries that have no XYZ-template URI
+    //    (20 Halle entries on geodienste.halle.de/opendata/ mis-tagged)
+    // 2) Force WMS version 1.1.1 on every Halle entry — the server's
+    //    MapServer 5.2.3 only advertises WMS 1.1.1 and rejects the
+    //    catalogue's Version=1.3.0 with "Missing required parameter SRS"
+    //    (1.3.0 uses CRS=, 1.1.1 uses SRS=). Appended `&version=1.1.1`
+    //    wins over any earlier capital-V `Version=` thanks to parseUri's
+    //    case-sensitive last-wins for non-LAYERS keys.
+    if (typeof o.uri === "string" && (o.type === "ogc_wms" || o.type === "ogc_wmts")) {
+      const p = parseUri(o.uri);
+      const hasXyzTemplate = p.type === "xyz" || /\{[zxyq]\}/.test(p.url || "");
+      try {
+        const u = new URL(p.url || "");
+        const isHalle = u.hostname === "geodienste.halle.de" && u.pathname.startsWith("/opendata/");
+        if (isHalle && !hasXyzTemplate) {
+          if (o.type === "ogc_wmts") o.type = "ogc_wms";
+          if (!/(?:^|&)version=1\.1\.1(?:&|$)/.test(o.uri)) {
+            o.uri = o.uri + "&version=1.1.1";
+          }
+        }
+      } catch {}
+    }
+    for (const k of Object.keys(o)) {
+      const v = o[k];
+      if (v && typeof v === "object") walk(v);
+    }
+  }
+  walk(data);
+}
+
 const Catalogs = {
   index: [],
   cache: new Map(),
@@ -1330,6 +2180,7 @@ const Catalogs = {
     const r = await fetch(CATALOG_BASE + name + ".json", { cache: "force-cache" });
     if (!r.ok) throw new Error("Katalog " + name + " nicht erreichbar");
     const data = await r.json();
+    applyCatalogOverrides(data);
     this.cache.set(name, data);
     return data;
   }
@@ -1338,6 +2189,12 @@ const Catalogs = {
 /* ─────────────────────────────────────────────────────────────────────────
    Module: source factories
 ───────────────────────────────────────────────────────────────────────── */
+// Cache the first WFS outputFormat that produced a usable body per
+// (origin, typename). Real-world driver: geo5.service24.rlp.de rejects
+// "application/json" outright with a MapServer "not a permitted output
+// format" exception, but accepts "application/gml+xml; version=3.2".
+const _wfsFormatCache = new Map();
+
 const SourceFactory = {
   async buildWMS(layerDef) {
     // ImageWMS (single GetMap per view) instead of TileWMS: WMS layers
@@ -1355,9 +2212,19 @@ const SourceFactory = {
       TRANSPARENT: true
     };
     if (p.styles) params.STYLES = p.styles;
+    // Catalogue entries may pin a WMS version explicitly — "version=1.1.1"
+    // (lowercase, QGIS-style), capital "Version" (a handful of HAL/ST
+    // entries), or full-caps "VERSION". OL's ImageWMS defaults to 1.3.0
+    // which legacy MapServer instances sometimes reject with an
+    // InvalidCRS exception (1.3.0 uses CRS=, 1.1.1 uses SRS=).
+    const wmsVersion = p.version || p.Version || p.VERSION;
+    if (wmsVersion) params.VERSION = wmsVersion;
     const source = new ol.source.ImageWMS({
       url, params,
-      crossOrigin: "anonymous",
+      // null for CORS-broken servers: <img> loads no-cors, canvas
+      // taints, PNG export of this layer breaks, but the layer
+      // becomes visible — see CORS_BROKEN_HOSTS rationale.
+      crossOrigin: corsModeFor(url),
       attributions: hostOf(url),
       ratio: 1.5
     });
@@ -1366,6 +2233,34 @@ const SourceFactory = {
     layer.set("_serviceUrl", url);
     layer.set("_type", "ogc_wms");
     layer.set("_layers", p.layers);
+    // Async-fetch scale hints from Capabilities. WMS pixel-size convention:
+    // resolution[m/px] = scaleDenominator × 0.00028 (0.28 mm per pixel).
+    // If the layer has a MaxScaleDenominator (typical of cadastre data like
+    // ST: ALKIS Flurstücke = 5001 → ~1.4 m/px ≈ zoom 17+), OL respects
+    // setMaxResolution and skips both render and GetMap below the threshold.
+    // The user gets one toast telling them to zoom in instead of an
+    // unexplained empty-tile reply from the server.
+    (async () => {
+      const hints = await _getWmsScaleDenoms(url, p.layers).catch(() => null);
+      if (!hints) return;
+      const PIX = 0.00028;
+      if (typeof hints.maxScale === "number") {
+        layer.setMaxResolution(hints.maxScale * PIX);
+      }
+      if (typeof hints.minScale === "number" && hints.minScale > 0) {
+        layer.setMinResolution(hints.minScale * PIX);
+      }
+      const res = view.getResolution();
+      if (!Number.isFinite(res)) return;
+      const NF = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 });
+      const name = layerDef.name || p.layers;
+      if (typeof hints.maxScale === "number" && res > hints.maxScale * PIX) {
+        Toast.info(name + ": nur ab Maßstab 1:" + NF.format(hints.maxScale) + " sichtbar. Bitte hineinzoomen.");
+      } else if (typeof hints.minScale === "number" && hints.minScale > 0 && res < hints.minScale * PIX) {
+        Toast.info(name + ": nur bis Maßstab 1:" + NF.format(hints.minScale) + " sichtbar. Bitte herauszoomen.");
+      }
+    })();
+    applyAttribution(layer);
     return layer;
   },
 
@@ -1414,6 +2309,7 @@ const SourceFactory = {
     layer.set("_serviceUrl", url);
     layer.set("_type", "ogc_wmts");
     layer.set("_layers", p.layers);
+    applyAttribution(layer);
     return layer;
   },
 
@@ -1441,6 +2337,7 @@ const SourceFactory = {
     const layer = new ol.layer.Tile({ source });
     layer.set("_serviceUrl", url);
     layer.set("_type", "ogc_wmts");
+    applyAttribution(layer);
     return layer;
   },
 
@@ -1450,37 +2347,180 @@ const SourceFactory = {
     if (!isSafeUrl(url)) throw new Error("Unsichere URL");
     url = await maybeUpgradeToHttps(url);
     const typename = p.typename || p.TYPENAME || p.typenames || p.layers;
+    // QGIS catalogue entries use `version='auto'` as a marker meaning
+    // "negotiate via Capabilities". We don't have that machinery client-
+    // side; treat auto / blank as 2.0.0 (the most common modern version).
+    let wfsVersion = (p.version || "").trim();
+    if (!wfsVersion || wfsVersion.toLowerCase() === "auto") wfsVersion = "2.0.0";
+    const isV2 = /^2/.test(wfsVersion);
+    // Paging: WFS 2.0 supports startindex; we loop pages until natural end
+    // or MAX_FEATURES cap to avoid hammering a server that refuses to give
+    // up a "real" totalMatched. WFS 1.x ignores startindex → single page.
+    const PAGE = 500;
+    const MAX_FEATURES = 5000;
+    let loadToken = 0;
+    let warnedTruncation = false;
     const source = new ol.source.Vector({
       format: new ol.format.GeoJSON(),
       strategy: ol.loadingstrategy.bbox,
       attributions: hostOf(url),
       loader: async function (extent, resolution, projection, success, failure) {
-        const u = new URL(url);
-        u.searchParams.set("service", "WFS");
-        u.searchParams.set("version", "2.0.0");
-        u.searchParams.set("request", "GetFeature");
-        u.searchParams.set("typenames", typename);
-        u.searchParams.set("outputFormat", "application/json");
-        u.searchParams.set("srsname", "EPSG:3857");
-        u.searchParams.set("bbox", extent.join(",") + ",EPSG:3857");
-        u.searchParams.set("count", "500");
-        try {
-          const r = await authedFetch(url, u.toString());
-          if (r.status === 401 || r.status === 403) {
-            TokenDialog.open(url, "");
-            failure && failure(); return;
+        const myToken = ++loadToken;
+        let origin = url;
+        try { origin = new URL(url).origin + ":" + typename; } catch {}
+        // Same trick as Identify's GFI format-cycling: WFS servers vary
+        // wildly in what outputFormat they accept. Some MapServer instances
+        // (e.g. geo5.service24.rlp.de) reject plain "application/json" but
+        // accept "application/json; subtype=geojson" or "text/xml;
+        // subtype=gml/3.2.1". Cache the first working format per
+        // (origin, typename) so we trial once and stick.
+        async function fetchPage(startIndex) {
+          const cached = _wfsFormatCache.get(origin);
+          const formats = cached ? [cached] : [
+            "application/json",
+            "application/json; subtype=geojson",
+            "application/gml+xml; version=3.2",
+            "text/xml; subtype=gml/3.2.1"
+          ];
+          for (const fmt of formats) {
+            const u = new URL(url);
+            u.searchParams.set("service", "WFS");
+            u.searchParams.set("version", wfsVersion);
+            u.searchParams.set("request", "GetFeature");
+            u.searchParams.set(isV2 ? "typenames" : "typename", typename);
+            u.searchParams.set("outputFormat", fmt);
+            u.searchParams.set(isV2 ? "srsname" : "srsName", "EPSG:3857");
+            u.searchParams.set("bbox", extent.join(",") + ",EPSG:3857");
+            u.searchParams.set(isV2 ? "count" : "maxFeatures", String(PAGE));
+            if (isV2 && startIndex > 0) u.searchParams.set("startindex", String(startIndex));
+            let r;
+            try { r = await authedFetch(url, u.toString()); }
+            catch { continue; }
+            if (myToken !== loadToken) return "_stale_";
+            if (r.status === 401 || r.status === 403) {
+              TokenDialog.open(url, "");
+              return "_auth_";
+            }
+            if (!r.ok) continue;
+            const ct = (r.headers.get("content-type") || "").toLowerCase();
+            const body = await r.text();
+            if (myToken !== loadToken) return "_stale_";
+            // ServiceException → server rejected this format/typename
+            if (/<(?:ows:)?ExceptionReport|<ServiceException|InvalidParameterValue|formatlist/i.test(body)) {
+              continue;
+            }
+            let feats = null;
+            let numberMatched = null;
+            let numberReturned = null;
+            try {
+              if (ct.includes("json") || body.trim().startsWith("{")) {
+                const data = JSON.parse(body);
+                // WFS 2.0 GeoJSON adds numberMatched/numberReturned at the
+                // top level. Some servers send "unknown" → coerce to null.
+                const nm = Number(data.numberMatched);
+                const nr = Number(data.numberReturned);
+                if (Number.isFinite(nm)) numberMatched = nm;
+                if (Number.isFinite(nr)) numberReturned = nr;
+                // We requested srsname=EPSG:3857; the server's GeoJSON
+                // response carries coordinates in that CRS even though
+                // RFC 7946 mandates WGS84. Tell the parser explicitly,
+                // otherwise OL re-projects from WGS84 → 3857 and places
+                // every geometry near the equator (x≈872411 read as
+                // ~872411° longitude → modulo to bogus coords).
+                feats = new ol.format.GeoJSON().readFeatures(data, {
+                  dataProjection: "EPSG:3857",
+                  featureProjection: projection
+                });
+              } else if (ct.includes("xml") || ct.includes("gml") || body.trim().startsWith("<")) {
+                // WFS 2.0 XML carries numberMatched/numberReturned as
+                // attributes on the root <wfs:FeatureCollection>. Cheap
+                // regex sniff is enough — we don't need a full XML parse
+                // just to read two integers off the envelope.
+                const mMatched = body.match(/numberMatched=["'](\d+)["']/);
+                const mReturned = body.match(/numberReturned=["'](\d+)["']/);
+                if (mMatched) numberMatched = Number(mMatched[1]);
+                if (mReturned) numberReturned = Number(mReturned[1]);
+                feats = new ol.format.WFS().readFeatures(body, {
+                  dataProjection: "EPSG:3857",
+                  featureProjection: projection
+                });
+              }
+            } catch { feats = null; }
+            if (!feats) continue;
+            _wfsFormatCache.set(origin, fmt);
+            if (numberReturned == null) numberReturned = feats.length;
+            return { feats, numberMatched, numberReturned };
           }
-          if (!r.ok) { failure && failure(); return; }
-          const data = await r.json();
-          const feats = source.getFormat().readFeatures(data, { featureProjection: projection });
-          source.addFeatures(feats);
-          success && success(feats);
-        } catch { failure && failure(); }
+          return null;
+        }
+
+        // Page loop: WFS 2.0 → multi-page until cap or natural end. WFS 1.x
+        // has no reliable paging, so one page is all we get. We accumulate
+        // across pages and only clear+addFeatures the source ONCE at the
+        // end, so the user never sees a half-built render.
+        const all = [];
+        let startIndex = 0;
+        let totalMatched = null;
+        let lastPageWasFull = false;
+        while (all.length < MAX_FEATURES) {
+          const res = await fetchPage(startIndex);
+          if (res === "_stale_") { failure && failure(); return; }
+          if (res === "_auth_") { failure && failure(); return; }
+          if (!res) {
+            // First page failed → hard fail. Later page failed → keep the
+            // partial accumulation so the user at least sees something.
+            if (all.length === 0) { failure && failure(); return; }
+            break;
+          }
+          all.push(...res.feats);
+          if (res.numberMatched != null) totalMatched = res.numberMatched;
+          lastPageWasFull = res.numberReturned >= PAGE;
+          if (!isV2) break;                                  // 1.x: no paging
+          if (!lastPageWasFull) break;                       // last page reached
+          if (totalMatched != null && all.length >= totalMatched) break;
+          startIndex += PAGE;
+        }
+
+        if (myToken !== loadToken) { failure && failure(); return; }
+
+        // Truncation feedback: there is clearly more on the server than
+        // what we loaded. Heuristic: explicit numberMatched overshoot, or
+        // we hit MAX_FEATURES with the last page still full, or WFS 1.x
+        // and the single page came back full (likely server cap).
+        // First-hit also fires a one-shot Toast; every reload updates the
+        // persistent badge in the active layer list so the user sees the
+        // current truncation state even after the toast has faded.
+        const moreOnServer = totalMatched != null
+          ? totalMatched > all.length
+          : lastPageWasFull && (all.length >= MAX_FEATURES || !isV2);
+        const detail = moreOnServer
+          ? (totalMatched != null
+              ? `${all.length.toLocaleString("de-DE")} von ${totalMatched.toLocaleString("de-DE")} Objekten`
+              : `${all.length.toLocaleString("de-DE")}+ Objekte (Server-Limit)`)
+          : null;
+        layer.set("_truncated", moreOnServer);
+        layer.set("_truncationDetail", detail);
+        if (typeof UI !== "undefined") UI.refreshTruncationBadge(layer);
+        if (moreOnServer && !warnedTruncation) {
+          warnedTruncation = true;
+          const name = layerDef.name || typename || "WFS";
+          Toast.info(`${name}: ${detail} geladen. Hineinzoomen für vollständige Ansicht.`);
+        }
+
+        // Wipe stale features + loaded-extents tree on every successful
+        // load. Without this, BBox-loader strategy stacks features as the
+        // user pans (OL only dedupes by feature id, which not every WFS
+        // server provides). Cost: small re-fetch on pan back into a
+        // previously visible extent.
+        source.clear(true);
+        source.addFeatures(all);
+        success && success(all);
       }
     });
     const layer = new ol.layer.Vector({ source, style: defaultVectorStyle() });
     layer.set("_serviceUrl", url);
     layer.set("_type", "ogc_wfs");
+    applyAttribution(layer);
     return layer;
   },
 
@@ -1494,6 +2534,9 @@ const SourceFactory = {
     const source = new ol.source.VectorTile({
       format: new ol.format.MVT(),
       url,
+      // Required for canvas-tainting-free PNG export of MVT-derived layers.
+      // Tile.crossOrigin propagates to the underlying fetch's CORS mode.
+      crossOrigin: "anonymous",
       attributions: hostOf(url),
       maxZoom: Number(p.zmax) || 22
     });
@@ -1507,6 +2550,7 @@ const SourceFactory = {
         Toast.err("Style konnte nicht angewendet werden: " + err.message);
       });
     }
+    applyAttribution(layer);
     return layer;
   },
 
@@ -1515,36 +2559,94 @@ const SourceFactory = {
     let url = p.url;
     if (!isSafeUrl(url)) throw new Error("Unsichere URL");
     url = await maybeUpgradeToHttps(url);
+    // OAPIF paging is link-based, not offset-based: each response carries a
+    // `links` array; we follow the entry with rel="next" until it's gone or
+    // we hit MAX_FEATURES. Same cap + truncation-toast as buildWFS.
+    const PAGE = 500;
+    const MAX_FEATURES = 5000;
+    let loadToken = 0;
+    let warnedTruncation = false;
     const source = new ol.source.Vector({
       format: new ol.format.GeoJSON(),
       strategy: ol.loadingstrategy.bbox,
       attributions: hostOf(url),
       loader: async function (extent, resolution, projection, success, failure) {
-        const u = new URL(url);
-        if (!u.pathname.endsWith("/items")) {
-          u.pathname = u.pathname.replace(/\/?$/, "/items");
+        const myToken = ++loadToken;
+        const baseU = new URL(url);
+        if (!baseU.pathname.endsWith("/items")) {
+          baseU.pathname = baseU.pathname.replace(/\/?$/, "/items");
         }
         const bbox4326 = ol.proj.transformExtent(extent, "EPSG:3857", "EPSG:4326");
-        u.searchParams.set("bbox", bbox4326.join(","));
-        u.searchParams.set("f", "json");
-        u.searchParams.set("limit", "500");
+        baseU.searchParams.set("bbox", bbox4326.join(","));
+        // OAPIF spec says default bbox CRS is WGS84 long/lat, but some
+        // implementations default to the collection's storage CRS. Pin it
+        // explicitly so EPSG:25832-storage servers don't reinterpret our
+        // WGS84 corner coordinates as ETRS89 metres.
+        baseU.searchParams.set("bbox-crs", "http://www.opengis.net/def/crs/OGC/1.3/CRS84");
+        baseU.searchParams.set("f", "json");
+        baseU.searchParams.set("limit", String(PAGE));
+
+        const all = [];
+        let totalMatched = null;
+        let serverHasMore = false;
+        let nextUrl = baseU.toString();
         try {
-          const r = await authedFetch(url, u.toString());
-          if (r.status === 401 || r.status === 403) {
-            TokenDialog.open(url, "");
-            failure && failure(); return;
+          while (nextUrl && all.length < MAX_FEATURES) {
+            const r = await authedFetch(url, nextUrl);
+            if (myToken !== loadToken) { failure && failure(); return; }
+            if (r.status === 401 || r.status === 403) {
+              TokenDialog.open(url, "");
+              failure && failure(); return;
+            }
+            if (!r.ok) {
+              if (all.length === 0) { failure && failure(); return; }
+              break; // partial result is better than nothing
+            }
+            const data = await r.json();
+            if (myToken !== loadToken) { failure && failure(); return; }
+            const feats = source.getFormat().readFeatures(data, { featureProjection: projection });
+            all.push(...feats);
+            const nm = Number(data.numberMatched);
+            if (Number.isFinite(nm)) totalMatched = nm;
+            const next = Array.isArray(data.links)
+              ? data.links.find(l => l && l.rel === "next" && l.href)
+              : null;
+            if (!next) { serverHasMore = false; nextUrl = null; break; }
+            try { nextUrl = new URL(next.href, nextUrl).toString(); }
+            catch { nextUrl = null; break; }
+            serverHasMore = true;
           }
-          if (!r.ok) { failure && failure(); return; }
-          const data = await r.json();
-          const feats = source.getFormat().readFeatures(data, { featureProjection: projection });
-          source.addFeatures(feats);
-          success && success(feats);
-        } catch { failure && failure(); }
+        } catch {
+          if (all.length === 0) { failure && failure(); return; }
+        }
+        // If we broke out because of MAX_FEATURES but nextUrl is still set,
+        // the server clearly has more to give. Same toast + badge as buildWFS.
+        const moreOnServer = totalMatched != null
+          ? totalMatched > all.length
+          : (serverHasMore && all.length >= MAX_FEATURES);
+        const detail = moreOnServer
+          ? (totalMatched != null
+              ? `${all.length.toLocaleString("de-DE")} von ${totalMatched.toLocaleString("de-DE")} Objekten`
+              : `${all.length.toLocaleString("de-DE")}+ Objekte (Cap erreicht)`)
+          : null;
+        layer.set("_truncated", moreOnServer);
+        layer.set("_truncationDetail", detail);
+        if (typeof UI !== "undefined") UI.refreshTruncationBadge(layer);
+        if (moreOnServer && !warnedTruncation) {
+          warnedTruncation = true;
+          const name = layerDef.name || "OGC API";
+          Toast.info(`${name}: ${detail} geladen. Hineinzoomen für vollständige Ansicht.`);
+        }
+        // Same stack-on-pan problem as buildWFS — clear before adding.
+        source.clear(true);
+        source.addFeatures(all);
+        success && success(all);
       }
     });
     const layer = new ol.layer.Vector({ source, style: defaultVectorStyle() });
     layer.set("_serviceUrl", url);
     layer.set("_type", "ogc_api_features");
+    applyAttribution(layer);
     return layer;
   }
 };
@@ -1571,7 +2673,7 @@ async function getLayerExtent(item) {
       extent = await _getOapifExtent(serviceUrl);
     } else if (type === "ogc_vectorTiles") {
       const p = parseUri(item.def.uri);
-      if (p.styleUrl && isSafeUrl(p.styleUrl)) extent = await _getVtExtentFromStyle(p.styleUrl);
+      if (p.styleUrl && isSafeUrl(p.styleUrl)) extent = await _getVtExtentFromStyle(serviceUrl, p.styleUrl);
     }
   } catch { extent = null; }
   if (extent && extent.every(Number.isFinite)) {
@@ -1589,14 +2691,154 @@ function _flattenWmsLayers(arr, acc = []) {
   return acc;
 }
 
+// Servers known to omit the Access-Control-Allow-Origin header. Browser
+// fetch / XHR / crossOrigin-tagged <img> requests against these are
+// blocked outright (the requests don't even hit the network layer
+// after the preflight). Sachsen-Anhalt's MapServer-AAA-suite instance
+// is misconfigured: it sets ACAH / ACAM / ACAC but not the actual
+// origin-allowance header, so every browser cross-site call is dropped.
+// Workaround: build the OL source WITHOUT crossOrigin so the browser
+// loads via plain <img> (no Origin header sent). Trade-off: the layer
+// canvas-taints, breaking PNG export for this layer specifically — but
+// the layer is visible, which is the user-visible bug we're fixing.
+//
+// The map value is a WGS84 bbox [minLon, minLat, maxLon, maxLat] used as
+// a fallback when Capabilities-fetch (the normal path for layer extent
+// + scale hints) is unreachable. ST's services all serve Sachsen-Anhalt
+// data, so the state's bounding box is a useful zoom-to-layer target.
+const CORS_BROKEN_HOSTS = new Map([
+  ["www.geodatenportal.sachsen-anhalt.de", [10.5, 50.9, 13.2, 53.1]],
+  ["geodatenportal.sachsen-anhalt.de",     [10.5, 50.9, 13.2, 53.1]]
+]);
+
+function isCorsBrokenHost(serviceUrl) {
+  try { return CORS_BROKEN_HOSTS.has(new URL(serviceUrl).hostname); }
+  catch { return false; }
+}
+
+function corsFallbackExtent(serviceUrl) {
+  let host;
+  try { host = new URL(serviceUrl).hostname; }
+  catch { return null; }
+  const bbox = CORS_BROKEN_HOSTS.get(host);
+  if (!bbox) return null;
+  return ol.proj.transformExtent(bbox, "EPSG:4326", "EPSG:3857");
+}
+
+function corsModeFor(serviceUrl) {
+  return isCorsBrokenHost(serviceUrl) ? null : "anonymous";
+}
+
+// Host-fallback attribution table: canonical "©  + Lizenz"-Strings for
+// the dominant German public geo-data providers. Used when Capabilities
+// returns nothing usable, or for service families (XYZ / Vector Tiles)
+// that don't expose a structured attribution. Order matters — first
+// regex match wins.
+const DL_DE_BY = { license: "dl-de/by-2-0", url: "https://www.govdata.de/dl-de/by-2-0" };
+const ATTRIBUTION_FALLBACKS = [
+  { match: /(?:^|\.)bkg\.bund\.de$|^sgx\.geodatenzentrum\.de$/i,
+    text: "© GeoBasis-DE / BKG", ...DL_DE_BY },
+  { match: /^via\.bund\.de$|wsv\.bund\.de$/i,
+    text: "© WSV - Wasserstraßen- und Schifffahrtsverwaltung des Bundes", ...DL_DE_BY },
+  { match: /(?:^|\.)bayern\.de$/i,
+    text: "© Bayerische Vermessungsverwaltung", ...DL_DE_BY },
+  { match: /(?:^|\.)berlin\.de$/i,
+    text: "© Geoportal Berlin (Senatsverwaltung)", ...DL_DE_BY },
+  { match: /(?:^|\.)hamburg\.de$/i,
+    text: "© Freie und Hansestadt Hamburg, LGV", ...DL_DE_BY },
+  { match: /(?:^|\.)bremen\.de$/i,
+    text: "© LGLN / Geoinformation Bremen", ...DL_DE_BY },
+  { match: /(?:^|\.)geobasis-bb\.de$|brandenburg\.de$/i,
+    text: "© LGB - Landesvermessung und Geobasisinformation Brandenburg", ...DL_DE_BY },
+  { match: /(?:^|\.)mv\.de$|mecklenburg-vorpommern\.de$/i,
+    text: "© GeoBasis-DE/M-V", ...DL_DE_BY },
+  { match: /(?:^|\.)niedersachsen\.de$|lgln\.de$/i,
+    text: "© Landesamt für Geoinformation und Landesvermessung Niedersachsen (LGLN)", ...DL_DE_BY },
+  { match: /(?:^|\.)nrw\.de$|geobasis\.nrw\.de$/i,
+    text: "© Geobasis NRW / Bezirksregierung Köln", ...DL_DE_BY },
+  { match: /(?:^|\.)rlp\.de$|service24\.rlp\.de$/i,
+    text: "© Landesamt für Vermessung und Geobasisinformation Rheinland-Pfalz (LVermGeo)", ...DL_DE_BY },
+  { match: /(?:^|\.)saarland\.de$/i,
+    text: "© Landesamt für Vermessung, Geoinformation und Landentwicklung Saarland", ...DL_DE_BY },
+  { match: /(?:^|\.)sachsen\.de$|geosn\.sachsen\.de$/i,
+    text: "© GeoSN - Staatsbetrieb Geobasisinformation und Vermessung Sachsen", ...DL_DE_BY },
+  { match: /(?:^|\.)sachsen-anhalt\.de$/i,
+    text: "© Landesamt für Vermessung und Geoinformation Sachsen-Anhalt (LVermGeo)", ...DL_DE_BY },
+  { match: /(?:^|\.)schleswig-holstein\.de$/i,
+    text: "© Landesamt für Vermessung und Geoinformation Schleswig-Holstein", ...DL_DE_BY },
+  { match: /(?:^|\.)thueringen\.de$/i,
+    text: "© Landesamt für Bodenmanagement und Geoinformation Thüringen (TLBG)", ...DL_DE_BY },
+  { match: /(?:^|\.)hessen\.de$|hvbg\.hessen\.de$/i,
+    text: "© Hessische Verwaltung für Bodenmanagement und Geoinformation (HVBG)", ...DL_DE_BY },
+  { match: /(?:^|\.)baden-wuerttemberg\.de$|^lgl-bw\.de$/i,
+    text: "© LGL Baden-Württemberg", ...DL_DE_BY },
+  { match: /(?:^|\.)openstreetmap\.org$/i,
+    text: "© OpenStreetMap-Mitwirkende", license: "ODbL", url: "https://www.openstreetmap.org/copyright" }
+];
+function _hostAttributionFallback(serviceUrl) {
+  let host;
+  try { host = new URL(serviceUrl).hostname; } catch { return null; }
+  const hit = ATTRIBUTION_FALLBACKS.find(f => f.match.test(host));
+  if (!hit) return null;
+  return { text: hit.text, license: hit.license, url: hit.url, source: "host-fallback" };
+}
+
+// Per-service WMS Capabilities cache — reused by extent + scale-hint
+// helpers so we don't burn N×RTT loading the same XML once for each
+// thing we need from it. Returns null synchronously for CORS-broken
+// hosts (the fetch would error and the user would get a console-noise
+// stream for nothing).
+const _wmsCapsCache = new Map();
+async function _getWmsCaps(serviceUrl) {
+  if (_wmsCapsCache.has(serviceUrl)) return _wmsCapsCache.get(serviceUrl);
+  if (isCorsBrokenHost(serviceUrl)) {
+    _wmsCapsCache.set(serviceUrl, Promise.resolve(null));
+    return null;
+  }
+  const p = (async () => {
+    const u = new URL(serviceUrl);
+    u.searchParams.set("SERVICE", "WMS");
+    u.searchParams.set("REQUEST", "GetCapabilities");
+    try {
+      const r = await authedFetch(serviceUrl, u.toString());
+      if (!r.ok) return null;
+      return new ol.format.WMSCapabilities().read(await r.text());
+    } catch { return null; }
+  })();
+  _wmsCapsCache.set(serviceUrl, p);
+  return p;
+}
+
+// Returns {minScale, maxScale} for a (potentially comma-separated) WMS
+// LAYERS string. Multi-sublayer: min = smallest minScale, max = largest
+// maxScale so the union of scale-ranges is what the layer renders in.
+async function _getWmsScaleDenoms(serviceUrl, layerName) {
+  const caps = await _getWmsCaps(serviceUrl);
+  if (!caps) return null;
+  const all = caps?.Capability?.Layer ? _flattenWmsLayers([caps.Capability.Layer]) : [];
+  const names = String(layerName || "").split(",").map(s => s.trim()).filter(Boolean);
+  let minS = null, maxS = null;
+  for (const n of names) {
+    const wanted = all.find(l => l.Name === n);
+    if (!wanted) continue;
+    if (typeof wanted.MinScaleDenominator === "number") {
+      minS = minS === null ? wanted.MinScaleDenominator : Math.min(minS, wanted.MinScaleDenominator);
+    }
+    if (typeof wanted.MaxScaleDenominator === "number") {
+      maxS = maxS === null ? wanted.MaxScaleDenominator : Math.max(maxS, wanted.MaxScaleDenominator);
+    }
+  }
+  return (minS === null && maxS === null) ? null : { minScale: minS, maxScale: maxS };
+}
+
 async function _getWmsExtent(serviceUrl, layerName) {
-  const u = new URL(serviceUrl);
-  u.searchParams.set("SERVICE", "WMS");
-  u.searchParams.set("REQUEST", "GetCapabilities");
-  const r = await authedFetch(serviceUrl, u.toString());
-  if (!r.ok) return null;
-  const txt = await r.text();
-  const caps = new ol.format.WMSCapabilities().read(txt);
+  // CORS-broken hosts: Capabilities-fetch is short-circuited to null
+  // upstream. Return the fallback regional extent so zoom-to-layer
+  // still centres on the right state instead of toasting "nicht
+  // ermittelbar".
+  const fallback = corsFallbackExtent(serviceUrl);
+  const caps = await _getWmsCaps(serviceUrl);
+  if (!caps) return fallback;
   const layers = caps?.Capability?.Layer ? _flattenWmsLayers([caps.Capability.Layer]) : [];
 
   // LAYERS may be a comma-separated list — union all individual extents.
@@ -1622,12 +2864,16 @@ async function _getWmsExtent(serviceUrl, layerName) {
 }
 
 async function _getWfsExtent(serviceUrl, typename) {
+  const fallback = corsFallbackExtent(serviceUrl);
+  if (isCorsBrokenHost(serviceUrl)) return fallback;
   const u = new URL(serviceUrl);
   u.searchParams.set("service", "WFS");
   u.searchParams.set("version", "2.0.0");
   u.searchParams.set("request", "GetCapabilities");
-  const r = await authedFetch(serviceUrl, u.toString());
-  if (!r.ok) return null;
+  let r;
+  try { r = await authedFetch(serviceUrl, u.toString()); }
+  catch { return fallback; }
+  if (!r.ok) return fallback;
   const text = await r.text();
   const doc = new DOMParser().parseFromString(text, "application/xml");
   const fts = doc.getElementsByTagNameNS("*", "FeatureType");
@@ -1649,12 +2895,16 @@ async function _getWfsExtent(serviceUrl, typename) {
 }
 
 async function _getOapifExtent(serviceUrl) {
+  const fallback = corsFallbackExtent(serviceUrl);
+  if (isCorsBrokenHost(serviceUrl)) return fallback;
   const u = new URL(serviceUrl);
   const m = u.pathname.match(/^(.+\/collections\/[^\/]+)(\/items)?\/?$/);
   if (m) u.pathname = m[1];
   u.searchParams.set("f", "json");
-  const r = await authedFetch(serviceUrl, u.toString());
-  if (!r.ok) return null;
+  let r;
+  try { r = await authedFetch(serviceUrl, u.toString()); }
+  catch { return fallback; }
+  if (!r.ok) return fallback;
   const j = await r.json();
   const bbox = j?.extent?.spatial?.bbox?.[0];
   if (!Array.isArray(bbox) || bbox.length < 4) return null;
@@ -1663,8 +2913,145 @@ async function _getOapifExtent(serviceUrl) {
   return ol.proj.transformExtent([minX, minY, maxX, maxY], "EPSG:4326", "EPSG:3857");
 }
 
-async function _getVtExtentFromStyle(styleUrl) {
-  const r = await fetch(styleUrl);
+// ─── Attribution / Lizenz-Auflösung ─────────────────────────────────────
+// Try service-specific Capabilities first, then the host-fallback table,
+// then a bare "Quelle: hostname". Result feeds OL's own attribution
+// widget (bottom-right, deduped across layers) AND the per-layer ©-
+// popover in the active-list. Caches per service to avoid duplicate
+// fetches when multiple layers share an origin.
+const _wfsAttributionCache = new Map();
+const _oapifAttributionCache = new Map();
+
+async function _getWmsAttribution(serviceUrl, layerName) {
+  const caps = await _getWmsCaps(serviceUrl);
+  if (!caps) return null;
+  const layers = caps?.Capability?.Layer ? _flattenWmsLayers([caps.Capability.Layer]) : [];
+  // WMS 1.3.0 per-layer Attribution wins if present.
+  const names = String(layerName || "").split(",").map(s => s.trim()).filter(Boolean);
+  for (const name of names) {
+    const w = layers.find(l => l.Name === name);
+    const t = (w?.Attribution?.Title || "").trim();
+    if (t) return { text: t, url: w.Attribution.OnlineResource || null, source: "wms-layer" };
+  }
+  // Service-level AccessConstraints is fallback. Many DE-Server senden
+  // Boilerplate-Strings wie "Es gelten keine Zugriffsbeschränkungen" oder
+  // "no restrictions" — die enthalten KEINEN Lizenztext und sind als
+  // Attribution unbrauchbar. Reject großzügig, damit Host-Fallback
+  // (mit korrekter dl-de/by-2-0-Angabe) zum Zug kommt.
+  const ac = (caps.Service?.AccessConstraints || "").trim();
+  if (ac && !_isUselessAccessConstraint(ac)) {
+    return { text: ac, source: "wms-service" };
+  }
+  return null;
+}
+function _isUselessAccessConstraint(s) {
+  const t = s.toLowerCase().trim();
+  return !t
+    || /^(none|keine|no conditions apply|not provided|n\/a|-)$/i.test(t)
+    || /es\s+gelten\s+keine\s+(zugriffs|nutzungs)?beschränkungen/i.test(t)
+    || /no\s+(access\s+)?(restrictions|conditions)/i.test(t)
+    || /unbeschr(ä|ae)nkt/i.test(t)
+    || /^(öffentlich|public)$/i.test(t);
+}
+
+async function _getWfsAttribution(serviceUrl) {
+  if (isCorsBrokenHost(serviceUrl)) return null;
+  if (_wfsAttributionCache.has(serviceUrl)) return _wfsAttributionCache.get(serviceUrl);
+  const p = (async () => {
+    const u = new URL(serviceUrl);
+    u.searchParams.set("service", "WFS");
+    u.searchParams.set("version", "2.0.0");
+    u.searchParams.set("request", "GetCapabilities");
+    try {
+      const r = await authedFetch(serviceUrl, u.toString());
+      if (!r.ok) return null;
+      const doc = new DOMParser().parseFromString(await r.text(), "application/xml");
+      const ac = doc.getElementsByTagNameNS("*", "AccessConstraints")[0]?.textContent.trim();
+      if (ac && !_isUselessAccessConstraint(ac)) {
+        return { text: ac, source: "wfs-service" };
+      }
+      return null;
+    } catch { return null; }
+  })();
+  _wfsAttributionCache.set(serviceUrl, p);
+  return p;
+}
+
+async function _getOapifAttribution(serviceUrl) {
+  if (isCorsBrokenHost(serviceUrl)) return null;
+  // serviceUrl points at the collection items endpoint; strip /items to
+  // hit the collection-metadata document where `license` lives.
+  let collUrl;
+  try {
+    const u = new URL(serviceUrl);
+    u.pathname = u.pathname.replace(/\/items\/?$/, "");
+    collUrl = u.toString();
+  } catch { return null; }
+  if (_oapifAttributionCache.has(collUrl)) return _oapifAttributionCache.get(collUrl);
+  const p = (async () => {
+    try {
+      const u = new URL(collUrl);
+      u.searchParams.set("f", "json");
+      const r = await authedFetch(serviceUrl, u.toString());
+      if (!r.ok) return null;
+      const data = await r.json();
+      if (data.license && typeof data.license === "string") {
+        return { text: data.license, source: "oapif-license" };
+      }
+      if (data.attribution && typeof data.attribution === "string") {
+        return { text: data.attribution, source: "oapif-attribution" };
+      }
+      const lic = Array.isArray(data.links) ? data.links.find(l => l?.rel === "license" && l?.href) : null;
+      if (lic) return { text: lic.title || "Lizenz", url: lic.href, source: "oapif-link" };
+      return null;
+    } catch { return null; }
+  })();
+  _oapifAttributionCache.set(collUrl, p);
+  return p;
+}
+
+async function resolveAttribution(layer) {
+  const type = layer.get("_type");
+  const serviceUrl = layer.get("_serviceUrl");
+  if (!serviceUrl) return null;
+  let parsed = null;
+  try {
+    if (type === "ogc_wms" || type === "ogc_wmts") {
+      parsed = await _getWmsAttribution(serviceUrl, layer.get("_layers") || "");
+    } else if (type === "ogc_wfs") {
+      parsed = await _getWfsAttribution(serviceUrl);
+    } else if (type === "ogc_api_features") {
+      parsed = await _getOapifAttribution(serviceUrl);
+    }
+  } catch { /* network/parse failure → fallback */ }
+  if (parsed) return parsed;
+  const fb = _hostAttributionFallback(serviceUrl);
+  if (fb) return fb;
+  try { return { text: "Quelle: " + new URL(serviceUrl).hostname, source: "hostname" }; }
+  catch { return null; }
+}
+
+// Apply resolved attribution: feed the OL widget (bottom-right) AND
+// store the structured form on the layer for the per-layer ©-popover.
+async function applyAttribution(layer) {
+  const attr = await resolveAttribution(layer);
+  if (!attr || !attr.text) return;
+  layer.set("_attribution", attr);
+  const source = layer.getSource ? layer.getSource() : null;
+  if (source && typeof source.setAttributions === "function") {
+    const text = attr.license ? `${attr.text} (${attr.license})` : attr.text;
+    source.setAttributions(text);
+  }
+  if (typeof UI !== "undefined" && typeof UI.refreshAttributionBtn === "function") {
+    UI.refreshAttributionBtn(layer);
+  }
+}
+
+async function _getVtExtentFromStyle(serviceUrl, styleUrl) {
+  // Route through authedFetch so token-protected Mapbox styles (Bearer on
+  // the same origin as the MVT tiles) load. Pre-fix this was raw fetch
+  // and silently 401'd for any authed style endpoint.
+  const r = await authedFetch(serviceUrl, styleUrl);
   if (!r.ok) return null;
   const j = await r.json();
   const sources = j.sources || {};
@@ -1706,6 +3093,31 @@ function hostOf(url) {
   try { return new URL(url).host; } catch { return ""; }
 }
 
+/* Build one GetLegendGraphic URL per WMS sublayer. Honours the
+   comma-joined LAYERS pattern parseUri() preserves and the catalogue's
+   pinned WMS version — without the latter, Halle's MapServer 5.2.3
+   rejects the legend call with the same SRS/CRS mismatch that
+   applyCatalogOverrides fixes for GetMap. */
+function legendUrlsForLayer(item) {
+  if (item.def.type !== "ogc_wms") return [];
+  const layer = item.layer;
+  const serviceUrl = layer.get("_serviceUrl");
+  if (!serviceUrl || !isSafeUrl(serviceUrl)) return [];
+  const layersParam = layer.get("_layers") || "";
+  const sublayers = layersParam.split(",").map(s => s.trim()).filter(Boolean);
+  const p = parseUri(item.def.uri || "");
+  const version = p.version || p.Version || p.VERSION || "1.3.0";
+  return sublayers.map(name => {
+    const u = new URL(serviceUrl);
+    u.searchParams.set("SERVICE", "WMS");
+    u.searchParams.set("REQUEST", "GetLegendGraphic");
+    u.searchParams.set("VERSION", version);
+    u.searchParams.set("LAYER", name);
+    u.searchParams.set("FORMAT", "image/png");
+    return u.toString();
+  });
+}
+
 function defaultVectorStyle() {
   const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#3b82f6";
   return [new ol.style.Style({
@@ -1723,51 +3135,199 @@ function defaultVectorStyle() {
    Module: map setup
 ───────────────────────────────────────────────────────────────────────── */
 const view = new ol.View({
-  center: ol.proj.fromLonLat([8.23, 46.82]),
-  zoom: 7,
+  // Geographic centre of Germany (~Niederdorla, TH) with a zoom that
+  // frames the country on a 1366×768 viewport. Permalink-restore
+  // overrides this on subsequent loads; this is the cold-start state.
+  center: ol.proj.fromLonLat([10.45, 51.16]),
+  zoom: 6,
   constrainResolution: true
 });
+
+// OSM base layer instance — created once, reused as the layer reference
+// returned by ActiveLayers.add() when the user toggles the "_base/osm"
+// tree entry. Default opacity 0.3 so catalogue themes remain legible.
+// 30 % is the cold-start + tree-re-toggle default — referenced from
+// boot, Permalink-restore migration, and BASE_BRANCH below.
+const BASE_DEFAULT_OPACITY = 0.3;
 
 const baseLayer = new ol.layer.Tile({
   source: new ol.source.OSM({ crossOrigin: "anonymous" })
 });
-baseLayer.set("_isBase", true);
-// Start at 30 % so the catalogue themes layered on top stay legible.
-baseLayer.setOpacity(0.3);
+baseLayer.setOpacity(BASE_DEFAULT_OPACITY);
 
 const map = new ol.Map({
   target: "map",
-  layers: [baseLayer],
+  // Empty layer list at start. The OSM base is added via ActiveLayers
+  // like any other theme — either on cold start (boot fallback) or
+  // through the user's tree-checkbox click. This is the architectural
+  // payoff of "BaseLayer als Tree-Eintrag": one code path for every
+  // layer, no special pinned row, no separate visibility/opacity state.
+  layers: [],
   view,
   controls: ol.control.defaults.defaults({ attributionOptions: { collapsible: true } })
 });
 
-/* Base layer is special: always present, never removable, but the user
-   wants to fade or hide it like any other theme. BaseLayer wraps the
-   visible/opacity state, fans changes out to the UI, and pushes them
-   into the permalink so a reload keeps the user's choice. Not part of
-   ActiveLayers.items because it has no catalogue id and shouldn't appear
-   in the tree. */
-const BaseLayer = {
-  layer: baseLayer,
-  name: "Hintergrundkarte (OSM)",
-  getOpacity() { return baseLayer.getOpacity(); },
-  setOpacity(v) {
-    const c = Math.max(0, Math.min(1, Number(v) || 0));
-    if (baseLayer.getOpacity() === c) return;
-    baseLayer.setOpacity(c);
-    UI.syncBaseLayerUI();
-    Permalink.scheduleUpdate();
-  },
-  isVisible() { return baseLayer.getVisible(); },
-  setVisible(v) {
-    const want = !!v;
-    if (baseLayer.getVisible() === want) return;
-    baseLayer.setVisible(want);
-    UI.syncBaseLayerUI();
-    Permalink.scheduleUpdate();
+/* Synthetic catalogue branch for the base layer. Treated like every other
+   theme by the tree-render + ActiveLayers code paths; only ActiveLayers.add
+   knows to reuse the existing baseLayer instance instead of building a new
+   source. The user can change its opacity, hide it, even drag it above
+   other themes — all through the standard active-pane controls. */
+const BASE_CATALOG_ID = "__synthetic__";
+const BASE_LAYER_PATH = "_base/osm";
+const BASE_BRANCH = {
+  countryKey: "_base",
+  countryLabel: "Hintergrund",
+  layers: {
+    osm: { type: "_base_osm", name: "OpenStreetMap", opacity: BASE_DEFAULT_OPACITY }
   }
 };
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: scale readout
+───────────────────────────────────────────────────────────────────────── */
+const ZoomChip = (() => {
+  const el = document.getElementById("zoom-chip");
+  if (!el) return { update() {} };
+  const zScale = el.querySelector(".z-scale");
+  // EPSG:3857 is the map projection; the scale denominator is
+  // resolution × inches/metre × dpi, formatted with German thousand
+  // separators. Listener is bound only to change:resolution because
+  // panning at constant zoom never alters the denominator — listening
+  // on change:center additionally would fire ~60 events/sec during a
+  // drag-pan with no observable change.
+  const DPI = 96;
+  const INCHES_PER_METRE = 39.3700787;
+  const NF = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 });
+  let lastText = "";
+  function update() {
+    const res = view.getResolution();
+    let next = "–";
+    if (Number.isFinite(res)) {
+      const mpu = view.getProjection().getMetersPerUnit() || 1;
+      const denom = res * mpu * INCHES_PER_METRE * DPI;
+      if (Number.isFinite(denom) && denom > 0) {
+        next = "1 : " + NF.format(Math.round(denom));
+      }
+    }
+    if (next === lastText) return;
+    lastText = next;
+    zScale.textContent = next;
+  }
+  view.on("change:resolution", update);
+  update();
+  return { update };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: coord chip — mouse position in WGS84 next to scale readout.
+   UTM is offered only inside the Identify popup footer (per-click), not as
+   permanent chrome — keeps the always-visible chip narrow.
+───────────────────────────────────────────────────────────────────────── */
+const CoordChip = (() => {
+  const el = document.getElementById("coord-chip");
+  if (!el) return { update() {} };
+  const out = el.querySelector(".c-coord");
+  let lastText = "–";
+  let throttleId = null;
+  function format(coord) {
+    const [lon, lat] = ol.proj.toLonLat(coord);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return "–";
+    return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  }
+  function set(text) {
+    if (text === lastText) return;
+    lastText = text;
+    out.textContent = text;
+  }
+  function onPointerMove(evt) {
+    if (throttleId) return;
+    throttleId = setTimeout(() => {
+      throttleId = null;
+      set(format(evt.coordinate));
+    }, 50);
+  }
+  map.on("pointermove", onPointerMove);
+  map.getViewport().addEventListener("mouseleave", () => set("–"));
+  return { format };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: AttributionPopover — globaler kleiner Floating-UI-Popover für
+   die ©-Buttons in der Active-Layer-Liste. Eine Instanz, anker wandert
+   pro Klick. Schließt bei outside-click und Escape.
+───────────────────────────────────────────────────────────────────────── */
+const AttributionPopover = (() => {
+  const el = document.getElementById("attribution-popover");
+  if (!el) return { open() {}, close() {} };
+  const body = el.querySelector(".popover-body");
+  const arrowEl = el.querySelector(".popover-arrow");
+  let currentAnchor = null;
+
+  function close() {
+    el.classList.remove("open");
+    currentAnchor = null;
+  }
+  function onDocClick(e) {
+    if (!el.classList.contains("open")) return;
+    if (el.contains(e.target)) return;
+    if (currentAnchor && currentAnchor.contains(e.target)) return;
+    close();
+  }
+  function onKey(e) {
+    if (e.key === "Escape" && el.classList.contains("open")) close();
+  }
+  document.addEventListener("click", onDocClick, true);
+  document.addEventListener("keydown", onKey);
+
+  function open(anchor, attr) {
+    currentAnchor = anchor;
+    body.innerHTML = "";
+    const title = document.createElement("strong");
+    title.textContent = attr.text;
+    body.appendChild(title);
+    if (attr.license) {
+      const lic = document.createElement("span");
+      lic.className = "license";
+      if (attr.url) {
+        const link = document.createElement("a");
+        link.href = attr.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Lizenz: " + attr.license;
+        lic.appendChild(link);
+      } else {
+        lic.textContent = "Lizenz: " + attr.license;
+      }
+      body.appendChild(lic);
+    }
+    el.classList.add("open");
+    if (window.FloatingUIDOM) {
+      window.FloatingUIDOM.computePosition(anchor, el, {
+        placement: "bottom-start",
+        middleware: [
+          window.FloatingUIDOM.offset(8),
+          window.FloatingUIDOM.flip(),
+          window.FloatingUIDOM.shift({ padding: 8 }),
+          window.FloatingUIDOM.arrow({ element: arrowEl })
+        ]
+      }).then(({ x, y, placement, middlewareData }) => {
+        Object.assign(el.style, { left: x + "px", top: y + "px" });
+        if (middlewareData.arrow) {
+          const { x: ax, y: ay } = middlewareData.arrow;
+          const side = placement.split("-")[0];
+          const opposite = { top: "bottom", right: "left", bottom: "top", left: "right" }[side];
+          Object.assign(arrowEl.style, {
+            left: ax != null ? ax + "px" : "",
+            top: ay != null ? ay + "px" : "",
+            [opposite]: "-5px",
+            transform: side === "bottom" ? "rotate(45deg)" : side === "top" ? "rotate(-135deg)" : ""
+          });
+        }
+      });
+    }
+  }
+  return { open, close };
+})();
 
 /* ─────────────────────────────────────────────────────────────────────────
    Module: active layers state
@@ -1788,7 +3348,17 @@ const ActiveLayers = {
       let layer;
       try {
         const type = layerDef.type;
-        if (type === "ogc_wms")            layer = await SourceFactory.buildWMS(layerDef);
+        if (type === "_base_osm") {
+          // Reuse the singleton baseLayer instance. attachStatusTracking
+          // would otherwise double-bind across re-checks of the same
+          // tree entry, so guard with a one-shot flag on the layer.
+          layer = baseLayer;
+          if (!layer.get("_statusBound")) {
+            attachStatusTracking(layer);
+            layer.set("_statusBound", true);
+          }
+        }
+        else if (type === "ogc_wms")            layer = await SourceFactory.buildWMS(layerDef);
         else if (type === "ogc_wmts")      layer = await SourceFactory.buildWMTS(layerDef);
         else if (type === "ogc_wfs")       layer = await SourceFactory.buildWFS(layerDef);
         else if (type === "ogc_api_features") layer = await SourceFactory.buildOgcApiFeatures(layerDef);
@@ -1825,8 +3395,14 @@ const ActiveLayers = {
       layer.set("_layerPath", layerPath);
       layer.set("_catalogId", catalogId);
 
-      attachStatusTracking(layer);
-      layer.on("change:opacity", () => UI.syncLayerOpacity(id));
+      // attachStatusTracking is also guarded inside the _base_osm branch
+      // above. For fresh layer instances (every non-base type) it always
+      // attaches; the flag below prevents a per-toggle leak on baseLayer.
+      if (layerDef.type !== "_base_osm") attachStatusTracking(layer);
+      if (!layer.get("_opListenerBound")) {
+        layer.on("change:opacity", () => UI.syncLayerOpacity(id));
+        layer.set("_opListenerBound", true);
+      }
 
       map.addLayer(layer);
       const item = { id, catalogId, layerKey, layerPath, def: layerDef, layer, status: "loading" };
@@ -1938,6 +3514,62 @@ function findLayerCheckbox(layerPath) {
 const SUPPORTED_LAYER_TYPES = ["ogc_wms", "ogc_wmts", "ogc_wfs", "ogc_api_features", "ogc_vectorTiles"];
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Module: FuzzySearch — tolerant catalogue-entry matching.
+
+   Goals tailored to the catalogue:
+   - Multi-token AND: "verw 1000" matches "Verwaltungsgebiete 1:1 000 000".
+   - Diacritic folding: "fur"/"für"/"fuer" all match "für"; "strasse"/"straße"
+     both match "Straße". Folds happen on both sides so query and haystack
+     share a canonical form.
+   - Subsequence fallback for skipped letters: "flrstk" matches "Flurstücke".
+   - Substring + word-start matches rank higher than subsequence matches so
+     the strongest hits float to the top of any ranking we later add.
+
+   No external dep, no CSP/SRI change needed — the inline-script SHA-256 is
+   recomputed at the end of the edit instead.
+───────────────────────────────────────────────────────────────────────── */
+const FuzzySearch = {
+  _normalize(s) {
+    return (s || "").toString().toLowerCase()
+      .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue")
+      .replace(/ß/g, "ss");
+  },
+  // Returns a non-negative score (0 = no match, higher = better) or 0 for a
+  // miss on any token. AND semantics across whitespace-separated tokens.
+  match(haystack, query) {
+    const q = this._normalize(query).trim();
+    if (!q) return 1;
+    const h = this._normalize(haystack);
+    if (!h) return 0;
+    const tokens = q.split(/\s+/);
+    let total = 0;
+    for (const t of tokens) {
+      const sub = h.indexOf(t);
+      if (sub !== -1) {
+        const prev = sub === 0 ? "" : h[sub - 1];
+        const atWordStart = sub === 0 || /[\s:/_\-()[\]]/.test(prev);
+        total += 10 + (atWordStart ? 5 : 0) - sub * 0.01;
+        continue;
+      }
+      // Subsequence fallback: characters of token appear in order in haystack.
+      let idx = 0, firstHit = -1, lastHit = -1;
+      for (let i = 0; i < h.length && idx < t.length; i++) {
+        if (h[i] === t[idx]) {
+          if (firstHit === -1) firstHit = i;
+          lastHit = i;
+          idx++;
+        }
+      }
+      if (idx < t.length) return 0;
+      const span = lastHit - firstHit + 1;
+      // Tighter spans score higher; subsequence always weaker than substring.
+      total += Math.max(1, 4 - (span - t.length) * 0.1);
+    }
+    return total;
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────────────────
    Module: UI — catalog dropdown, tree, active list
 ───────────────────────────────────────────────────────────────────────── */
 const UI = {
@@ -2013,8 +3645,11 @@ const UI = {
   },
 
   // Resolve a layer definition by its full path
-  // `country/[group/]layerKey` against the current catalogue.
+  // `country/[group/]layerKey` against the current catalogue. The base
+  // layer is a synthetic entry not present in any catalogue file, so
+  // it gets resolved first via a path-prefix check.
   findLayerByPath(path) {
+    if (path === BASE_LAYER_PATH) return BASE_BRANCH.layers.osm;
     const data = this.currentCatalogData;
     if (!data || !path) return null;
     const parts = path.split("/");
@@ -2068,6 +3703,9 @@ const UI = {
       const all = await Promise.all(loaders);
       if (v !== this._renderVersion) return; // a newer render started
       root.innerHTML = "";
+      // Synthetic base-layer branch always rendered first, regardless of
+      // catalogue scope. It isn't part of any upstream catalogue file.
+      this._renderSyntheticBranch(root);
       for (let i = 0; i < Catalogs.index.length; i++) {
         const entry = Catalogs.index[i];
         const data = all[i];
@@ -2076,6 +3714,7 @@ const UI = {
       }
     } else {
       root.innerHTML = "";
+      this._renderSyntheticBranch(root);
       if (this.currentCatalogData) {
         this._renderCatalogBranch(this.currentCatalogId, null, this.currentCatalogData, root, /*topLevel=*/ true);
       }
@@ -2084,14 +3723,64 @@ const UI = {
     if (root.children.length === 0) {
       const empty = document.createElement("li");
       empty.className = "tree-empty";
-      empty.textContent = this.searchQuery ? "Keine Treffer." : "Kein Inhalt.";
+      // Mini compass illustration. The needle's south half is muted to
+      // reuse the same north-accent / south-soft language as the brand
+      // mark in the topbar — small visual rhyme across the app.
+      empty.innerHTML = `
+        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <circle cx="24" cy="24" r="20"/>
+          <path d="M4 24h40M24 4v40" stroke-dasharray="1 3" opacity="0.5" stroke-linecap="round"/>
+          <path d="M24 10l5 13.5h-10z" fill="currentColor" stroke="none"/>
+          <path d="M24 24.5l-4 11.5h8z" fill="currentColor" stroke="none" opacity="0.32"/>
+          <circle cx="24" cy="24" r="1.6" fill="currentColor" stroke="none"/>
+        </svg>
+        <div></div>
+      `;
+      empty.querySelector("div").textContent = this.searchQuery ? "Keine Treffer." : "Kein Inhalt.";
       root.appendChild(empty);
     }
   },
 
+  // Render the synthetic "Hintergrund" branch (the OSM base layer entry).
+  // It mirrors the country-group structure so all the existing tree CSS
+  // and keyboard handling apply unchanged.
+  _renderSyntheticBranch(parent) {
+    const li = document.createElement("li");
+    li.className = "group synthetic-branch";
+    li.setAttribute("role", "treeitem");
+    li.setAttribute("aria-expanded", "true");
+
+    const row = document.createElement("div");
+    row.className = "row";
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.innerHTML = `
+      <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span></span>
+    `;
+    row.querySelector("span").textContent = BASE_BRANCH.countryLabel;
+    row.addEventListener("click", () => {
+      const expanded = li.getAttribute("aria-expanded") === "true";
+      li.setAttribute("aria-expanded", String(!expanded));
+    });
+    row.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); row.click(); }
+    });
+    li.appendChild(row);
+
+    const ul = document.createElement("ul");
+    ul.setAttribute("role", "group");
+    ul.appendChild(this._renderLayerLi("osm", BASE_BRANCH.layers.osm, BASE_CATALOG_ID, ["_base", "osm"]));
+    li.appendChild(ul);
+    parent.appendChild(li);
+  },
+
   _renderCatalogBranch(catalogId, catalogTitle, data, parent, topLevel = false) {
-    const q = this.searchQuery.trim().toLowerCase();
+    const q = this.searchQuery.trim();
     const matchesType = t => this.filterTypes.has(t);
+    const matchesQuery = (name, key) => !q
+      || FuzzySearch.match(name, q) > 0
+      || FuzzySearch.match(key, q) > 0;
 
     const countryContainers = [];
 
@@ -2103,12 +3792,12 @@ const UI = {
         if (def.layers) {
           const subs = Object.entries(def.layers)
             .filter(([k, l]) => matchesType(l.type))
-            .filter(([k, l]) => !q || (l.name || "").toLowerCase().includes(q) || k.toLowerCase().includes(q));
+            .filter(([k, l]) => matchesQuery(l.name, k));
           if (subs.length === 0) continue;
           countryEntries.push({ kind: "group", key: layerKey, def, subs });
         } else if (def.type) {
           if (!matchesType(def.type)) continue;
-          if (q && !(def.name || "").toLowerCase().includes(q) && !layerKey.toLowerCase().includes(q)) continue;
+          if (!matchesQuery(def.name, layerKey)) continue;
           countryEntries.push({ kind: "layer", key: layerKey, def });
         }
       }
@@ -2224,15 +3913,19 @@ const UI = {
     li.dataset.layerId = id;
     li.dataset.layerPath = path;
 
-    const supported = SUPPORTED_LAYER_TYPES.includes(def.type);
+    // Synthetic base layer is always supported + always safe — it has no
+    // URI of its own (the source is constructed from ol.source.OSM
+    // internally), so the usual isSafeUrl() check would reject it.
+    const isBase = def.type === "_base_osm";
+    const supported = isBase || SUPPORTED_LAYER_TYPES.includes(def.type);
     const isWeb = def.type === "web";
     const isWcs = def.type === "ogc_wcs";
 
     // URL safety check
     const p = parseUri(def.uri || "");
     const url = isWeb ? def.uri : p.url;
-    const safe = isSafeUrl(url);
-    const insecure = safe && url && !isHttps(url);
+    const safe = isBase || isSafeUrl(url);
+    const insecure = !isBase && safe && url && !isHttps(url);
 
     if (!supported || !safe) li.classList.add("unsupported");
     if (!safe) li.classList.add("unsafe");
@@ -2351,57 +4044,18 @@ const UI = {
     const root = document.getElementById("active-list");
     const pane = document.getElementById("active-pane");
     root.innerHTML = "";
-    // Base layer is always rendered, so the pane is never structurally empty.
-    pane.classList.remove("empty");
+    const empty = ActiveLayers.items.length === 0;
+    pane.classList.toggle("empty", empty);
+    if (empty) {
+      const li = document.createElement("li");
+      li.className = "active-empty";
+      li.textContent = "Keine aktiven Layer.";
+      root.appendChild(li);
+      return;
+    }
     for (const item of ActiveLayers.items) {
       root.appendChild(this._renderActiveItem(item));
     }
-    root.appendChild(this._renderBaseActiveItem());
-  },
-
-  _renderBaseActiveItem() {
-    const li = document.createElement("li");
-    li.className = "active-item base-item";
-    li.dataset.id = "__base__";
-    li.innerHTML = `
-      <div class="head-row">
-        <button class="icon-btn vis" type="button" aria-label="Sichtbarkeit umschalten" title="Sichtbar/Unsichtbar">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
-        </button>
-        <span class="name"></span>
-      </div>
-      <div class="opacity-row">
-        <input type="range" min="0" max="100" step="1" aria-label="Transparenz Hintergrundkarte" title="Transparenz">
-        <span class="op-val"></span>
-      </div>
-    `;
-    li.querySelector(".name").textContent = BaseLayer.name;
-    const slider = li.querySelector("input[type=range]");
-    const val = li.querySelector(".op-val");
-    const pct = Math.round(BaseLayer.getOpacity() * 100);
-    slider.value = pct;
-    val.textContent = pct + "%";
-    if (!BaseLayer.isVisible()) li.classList.add("hidden-layer");
-    slider.addEventListener("input", () => {
-      const v = Number(slider.value);
-      val.textContent = v + "%";
-      BaseLayer.setOpacity(v / 100);
-    });
-    li.querySelector(".vis").addEventListener("click", () => {
-      BaseLayer.setVisible(!BaseLayer.isVisible());
-    });
-    return li;
-  },
-
-  syncBaseLayerUI() {
-    const li = document.querySelector('.active-item.base-item');
-    if (!li) return;
-    const slider = li.querySelector("input[type=range]");
-    const val = li.querySelector(".op-val");
-    const pct = Math.round(BaseLayer.getOpacity() * 100);
-    if (slider && slider.value !== String(pct)) slider.value = pct;
-    if (val) val.textContent = pct + "%";
-    li.classList.toggle("hidden-layer", !BaseLayer.isVisible());
   },
 
   _renderActiveItem(item) {
@@ -2420,6 +4074,13 @@ const UI = {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
       <span class="name"></span>
+      <button class="icon-btn legend" type="button" aria-label="Legende anzeigen" title="Legende" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h14" stroke-linecap="round"/></svg>
+      </button>
+      <span class="trunc-badge" hidden>teilw.</span>
+      <button class="icon-btn copyright-btn" type="button" aria-label="Lizenz und Quelle anzeigen" title="Lizenz / Quelle" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5a3 3 0 1 0 0 5" stroke-linecap="round"/></svg>
+      </button>
       <span class="status" title=""></span>
       <button class="icon-btn rm" type="button" aria-label="Layer entfernen" title="Entfernen">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18" stroke-linecap="round"/></svg>
@@ -2427,13 +4088,137 @@ const UI = {
     `;
     li.querySelector(".name").textContent = item.def.name || item.layerKey;
     if (!item.layer.getVisible()) li.classList.add("hidden-layer");
+    this._applyTruncBadge(li, item.layer);
+    this._applyAttributionBtn(li, item.layer);
     li.querySelector(".vis").addEventListener("click", () => {
       const v = !item.layer.getVisible();
       ActiveLayers.setVisible(item.id, v);
     });
     li.querySelector(".rm").addEventListener("click", () => ActiveLayers.remove(item.id));
+
+    // Legend toggle — only meaningful for WMS in this round. Other types
+    // get a disabled button (visible but greyed out) so the column stays
+    // aligned across all active items.
+    const legendBtn = li.querySelector(".legend");
+    const hasLegend = item.def.type === "ogc_wms";
+    if (!hasLegend) {
+      legendBtn.disabled = true;
+      legendBtn.title = "Keine Legende verfügbar";
+    }
+    legendBtn.addEventListener("click", async () => {
+      const open = li.classList.toggle("legend-open");
+      legendBtn.setAttribute("aria-expanded", String(open));
+      if (open) await this.renderLegend(li, item);
+    });
+
     this.updateActiveStatus(item.layer, li);
     return li;
+  },
+
+  // Mutate just the trunc-badge of an existing .active-item row instead of
+  // rebuilding the whole list when paging finishes. Called from
+  // SourceFactory.buildWFS / buildOgcApiFeatures via UI.refreshTruncationBadge.
+  _applyTruncBadge(li, layer) {
+    const badge = li.querySelector(".trunc-badge");
+    if (!badge) return;
+    const trunc = !!layer.get("_truncated");
+    const detail = layer.get("_truncationDetail");
+    badge.hidden = !trunc;
+    if (trunc) {
+      badge.title = detail
+        ? `Nur ${detail} geladen — hineinzoomen für vollständige Ansicht.`
+        : "Server lieferte nur einen Teil der Objekte.";
+    } else {
+      badge.removeAttribute("title");
+    }
+  },
+  refreshTruncationBadge(layer) {
+    const id = layer.get("_catalogId") + "::" + layer.get("_layerPath");
+    const li = document.querySelector(`.active-item[data-id="${CSS.escape(id)}"]`);
+    if (li) this._applyTruncBadge(li, layer);
+  },
+
+  // ©-Button im Active-Item: zeigt nur an wenn Attribution mehr ist als
+  // "Quelle: hostname" (hostname-only ist Pflichtangabe ohne Mehrwert für
+  // den Nutzer — versteckt). Click öffnet das globale #attribution-popover
+  // anker an den Button via Floating UI.
+  _applyAttributionBtn(li, layer) {
+    const btn = li.querySelector(".copyright-btn");
+    if (!btn) return;
+    const attr = layer.get("_attribution");
+    const meaningful = attr && attr.text && attr.source !== "hostname";
+    btn.hidden = !meaningful;
+    if (meaningful) {
+      btn.title = "Lizenz / Quelle: " + attr.text + (attr.license ? ` (${attr.license})` : "");
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        AttributionPopover.open(btn, attr);
+      };
+    } else {
+      btn.onclick = null;
+    }
+  },
+  refreshAttributionBtn(layer) {
+    const id = layer.get("_catalogId") + "::" + layer.get("_layerPath");
+    const li = document.querySelector(`.active-item[data-id="${CSS.escape(id)}"]`);
+    if (li) this._applyAttributionBtn(li, layer);
+  },
+
+  // Fetch + render legend images for a WMS active-item. Uses authedFetch
+  // so token-protected services produce bearer-authenticated blobs the
+  // browser can then display as <img>. Result is cached on the DOM node
+  // (data-loaded) so re-opening the accordion doesn't re-request.
+  async renderLegend(li, item) {
+    let cont = li.querySelector(".active-legend");
+    if (!cont) {
+      cont = document.createElement("div");
+      cont.className = "active-legend";
+      li.appendChild(cont);
+    }
+    if (cont.dataset.loaded === "1") return;
+    cont.innerHTML = '<div class="legend-loading">Lädt…</div>';
+    const urls = legendUrlsForLayer(item);
+    if (!urls.length) {
+      cont.innerHTML = '<div class="legend-empty">Keine Legende verfügbar.</div>';
+      return;
+    }
+    const serviceUrl = item.layer.get("_serviceUrl");
+    cont.innerHTML = "";
+    cont.dataset.loaded = "1";
+    // Pre-create img elements in source order so the rendered legend
+    // mirrors the LAYERS comma-list (sublayer 21, then 25, then 19).
+    // Fetches run in parallel via Promise.all — sequential awaits were
+    // N×RTT for catalogue entries with multiple sublayers.
+    const slots = urls.map(() => {
+      const img = document.createElement("img");
+      img.alt = "Legende";
+      img.loading = "lazy";
+      img.referrerPolicy = "no-referrer";
+      cont.appendChild(img);
+      return img;
+    });
+    await Promise.all(urls.map(async (u, i) => {
+      const img = slots[i];
+      try {
+        const r = await authedFetch(serviceUrl, u);
+        if (!r.ok) { img.remove(); return; }
+        const blob = await r.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        // Bind handlers before assigning src so a synchronous load /
+        // error (cached blob) can't fire before we're listening.
+        img.onload  = () => URL.revokeObjectURL(blobUrl);
+        img.onerror = () => { URL.revokeObjectURL(blobUrl); img.remove(); };
+        img.src = blobUrl;
+      } catch {
+        img.remove();
+      }
+    }));
+    if (!cont.querySelector("img") && !cont.querySelector(".legend-empty")) {
+      // All fetches failed — show empty hint, but don't drop the loaded
+      // marker so the user gets a deterministic message instead of a
+      // re-load on the next click.
+      cont.innerHTML = '<div class="legend-empty">Legende konnte nicht geladen werden.</div>';
+    }
   },
 
   // Mirror opacity to every slider tied to this layer id (tree + active pane)
@@ -2477,7 +4262,8 @@ function typeBadge(t) {
   return ({
     ogc_wms: "WMS", ogc_wmts: "WMTS", ogc_wfs: "WFS",
     ogc_api_features: "OGC API", ogc_wcs: "WCS",
-    ogc_vectorTiles: "VectorTiles", web: "URL"
+    ogc_vectorTiles: "VectorTiles", web: "URL",
+    _base_osm: "Basis"
   })[t] || (t || "?").toUpperCase();
 }
 
@@ -2545,9 +4331,14 @@ const Identify = (() => {
     coord = evt.coordinate;
 
     // Build a query per visible active layer, dispatch all in parallel
-    // with a per-layer timeout, then render once all settle.
+    // with a per-layer timeout, then render once all settle. Capped to
+    // the top six visible layers to avoid hammering services when the
+    // user has many WMS layers active — anything below the top isn't
+    // visually meaningful at the click pixel anyway.
+    const IDENTIFY_CONCURRENCY = 6;
     const queries = ActiveLayers.items
       .filter(item => item.layer.getVisible())
+      .slice(-IDENTIFY_CONCURRENCY)
       .map(item => {
         const type = item.def.type;
         const layer = item.layer;
@@ -2581,44 +4372,81 @@ const Identify = (() => {
     render(results, evt.coordinate);
   }
 
+  // Cache the first GFI INFO_FORMAT that produced a non-exception response
+  // for a given service origin. Real-world example: Sachsen-Anhalt's
+  // MapServer rejects `application/json` with an InvalidFormat exception
+  // — every click would otherwise re-trial JSON before falling back.
+  const _gfiFormatCache = new Map();
+
   async function queryWMS(layer, evt) {
     const src = layer.getSource();
     const viewRes = view.getResolution();
     const projection = view.getProjection();
-    const url = src.getFeatureInfoUrl(evt.coordinate, viewRes, projection, {
-      INFO_FORMAT: "application/json",
-      FEATURE_COUNT: 10
-    });
-    if (!url) return null;
     const serviceUrl = layer.get("_serviceUrl");
-    let resp;
-    try {
-      resp = await authedFetch(serviceUrl, url);
-    } catch {
-      return null;
-    }
-    if (resp.status === 401 || resp.status === 403) {
-      handleAuthError(layer);
-      throw new Error("Authentifizierung erforderlich");
-    }
-    if (!resp.ok) return null;
-    const ct = (resp.headers.get("content-type") || "").toLowerCase();
-    if (ct.includes("json")) {
-      const j = await resp.json();
-      if (j.features && j.features.length) {
-        return j.features.map(f => f.properties || {});
+    let origin = serviceUrl;
+    try { origin = new URL(serviceUrl).origin; } catch {}
+
+    // Preference order: GeoJSON (parses to typed fields), then GML
+    // (structured XML, shown as escaped <pre>), then HTML (server-styled,
+    // last resort). Once one format works for a server, lock it in.
+    const cached = _gfiFormatCache.get(origin);
+    const formats = cached ? [cached] : [
+      "application/json",
+      "application/vnd.ogc.gml",
+      "text/html"
+    ];
+
+    for (const fmt of formats) {
+      const url = src.getFeatureInfoUrl(evt.coordinate, viewRes, projection, {
+        INFO_FORMAT: fmt,
+        FEATURE_COUNT: 10
+      });
+      if (!url) continue;
+      let resp;
+      try {
+        resp = await authedFetch(serviceUrl, url);
+      } catch { continue; }
+      if (resp.status === 401 || resp.status === 403) {
+        handleAuthError(layer);
+        throw new Error("Authentifizierung erforderlich");
       }
-      return null;
+      if (!resp.ok) continue;
+      const ct = (resp.headers.get("content-type") || "").toLowerCase();
+      const body = await resp.text();
+      if (!body.trim()) {
+        // Server accepted the format but had no features here. Lock the
+        // format in and return "no info" so we don't reprobe on every click.
+        _gfiFormatCache.set(origin, fmt);
+        return null;
+      }
+      // ServiceException response — server rejected this format (or this
+      // layer isn't queryable). Try the next format instead of erroring.
+      if (/<ServiceException|InvalidFormat|MissingDimensionValue|msWMSDispatch|ows_enable_request|request not enabled/i.test(body)) {
+        continue;
+      }
+      // GeoJSON path
+      if (ct.includes("json") || (fmt === "application/json" && body.trim().startsWith("{"))) {
+        try {
+          const j = JSON.parse(body);
+          _gfiFormatCache.set(origin, fmt);
+          if (j.features && j.features.length) {
+            return j.features.map(f => f.properties || {});
+          }
+          return null;
+        } catch { continue; }
+      }
+      // GML / XML path — render as escaped pre-block (preserves structure
+      // without trusting CDATA from arbitrary catalogue services).
+      if (fmt === "application/vnd.ogc.gml" || ct.includes("gml") || ct.includes("xml")) {
+        _gfiFormatCache.set(origin, fmt);
+        const esc = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return { _html: safeHtml("<pre>" + esc.slice(0, 4000) + "</pre>") };
+      }
+      // HTML fallback — sanitise + render
+      _gfiFormatCache.set(origin, fmt);
+      return { _html: safeHtml(body) };
     }
-    const body = await resp.text();
-    if (!body.trim()) return null;
-    // MapServer / GeoServer / OGC return ServiceException XML when
-    // GetFeatureInfo is disabled (or the layer isn't queryable). Detect
-    // and drop instead of showing the raw error text to the user.
-    if (ct.includes("xml") || /<ServiceException|msWMSDispatch|ows_enable_request|request not enabled/i.test(body)) {
-      return null;
-    }
-    return { _html: safeHtml(body) };
+    return null;
   }
 
   function handleAuthError(layer) {
@@ -2629,16 +4457,21 @@ const Identify = (() => {
   function render(results, coordinate) {
     tabsEl.innerHTML = "";
     bodyEl.innerHTML = "";
+    const hint = document.getElementById("popup-hint");
+    renderFooter(coordinate);
     if (results.length === 0) {
-      const div = document.createElement("div");
-      div.className = "empty";
-      div.textContent = "Keine Informationen an dieser Stelle.";
-      bodyEl.appendChild(div);
+      // Compact mode: inline hint in the header, no body, just the
+      // coord-strip below. Avoids a tall empty popup with centred text.
+      popup.classList.add("compact");
+      hint.textContent = "Kein Treffer an dieser Stelle.";
+      hint.hidden = false;
       popup.classList.add("open");
       overlay.setPosition(coordinate);
       positionPopup(coordinate);
       return;
     }
+    popup.classList.remove("compact");
+    hint.hidden = true;
 
     results.forEach((r, idx) => {
       const tab = document.createElement("button");
@@ -2701,6 +4534,65 @@ const Identify = (() => {
     return table;
   }
 
+  // Render click-coordinate footer pinned to the popup base. Always shown
+  // (even on empty result) so coords are always to hand, not just when a
+  // layer responded. UTM offered as a second row because cadastre work
+  // is ETRS89 / UTM 32 (W of 12°E) or 33 (E of 12°E). Buttons are
+  // clipboard-icon ghosts to save horizontal space for the values.
+  const footerEl = document.getElementById("popup-footer");
+  const CLIPBOARD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="8" y="4" width="10" height="14" rx="1.5"/><path d="M6 8v12h10" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  function makeCopyBtn(text, toastMsg) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-btn-icon";
+    btn.title = "In Zwischenablage kopieren";
+    btn.setAttribute("aria-label", "In Zwischenablage kopieren");
+    btn.innerHTML = CLIPBOARD_SVG;
+    btn.addEventListener("click", () => {
+      navigator.clipboard.writeText(text)
+        .then(() => Toast.info(toastMsg))
+        .catch(() => Toast.err("Kopieren nicht möglich."));
+    });
+    return btn;
+  }
+  function makeCoordRow(label, valueText, copyText, toastMsg) {
+    const row = document.createElement("div");
+    row.className = "coord-row";
+    const lbl = document.createElement("span");
+    lbl.className = "lbl";
+    lbl.textContent = label;
+    const code = document.createElement("code");
+    code.textContent = valueText;
+    row.appendChild(lbl);
+    row.appendChild(code);
+    row.appendChild(makeCopyBtn(copyText, toastMsg));
+    return row;
+  }
+  function renderFooter(coordinate) {
+    footerEl.innerHTML = "";
+    if (!coordinate) return;
+    const [lon, lat] = ol.proj.toLonLat(coordinate);
+    const utmEpsg = lon < 12 ? "EPSG:25832" : "EPSG:25833";
+    const wrap = document.createElement("div");
+    wrap.className = "identify-footer";
+    wrap.appendChild(makeCoordRow(
+      "WGS84",
+      `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
+      `${lat.toFixed(6)}, ${lon.toFixed(6)}`,
+      "WGS84-Koordinaten kopiert."
+    ));
+    try {
+      const [e, n] = ol.proj.transform(coordinate, "EPSG:3857", utmEpsg);
+      wrap.appendChild(makeCoordRow(
+        utmEpsg.replace("EPSG:", ""),
+        `${Math.round(e)} E / ${Math.round(n)} N`,
+        `${e.toFixed(2)}, ${n.toFixed(2)}`,
+        `${utmEpsg}-Koordinaten kopiert.`
+      ));
+    } catch { /* UTM transform failed; row simply skipped */ }
+    footerEl.appendChild(wrap);
+  }
+
   function positionPopup(coordinate) {
     // Use Floating UI for nicer placement: anchor is screen-space pixel
     const pixel = map.getPixelFromCoordinate(coordinate);
@@ -2718,17 +4610,37 @@ const Identify = (() => {
       })
     };
     if (window.FloatingUIDOM) {
+      const arrowEl = popup.querySelector(".popup-arrow");
       window.FloatingUIDOM.computePosition(virtualEl, popup, {
         placement: "top",
         middleware: [
           window.FloatingUIDOM.offset(10),
           window.FloatingUIDOM.flip(),
-          window.FloatingUIDOM.shift({ padding: 8 })
-        ]
-      }).then(({ x, y }) => {
+          window.FloatingUIDOM.shift({ padding: 8 }),
+          arrowEl && window.FloatingUIDOM.arrow({ element: arrowEl })
+        ].filter(Boolean)
+      }).then(({ x, y, placement, middlewareData }) => {
         popup.style.left = x + "px";
         popup.style.top = y + "px";
         popup.style.position = "fixed";
+        if (!arrowEl) return;
+        const { x: ax, y: ay } = middlewareData.arrow || {};
+        const side = placement.split("-")[0];
+        const staticSide = { top: "bottom", right: "left", bottom: "top", left: "right" }[side];
+        arrowEl.style.left   = ax != null ? ax + "px" : "";
+        arrowEl.style.top    = ay != null ? ay + "px" : "";
+        arrowEl.style.right  = "";
+        arrowEl.style.bottom = "";
+        // Push the diamond half-out of the popup so its hypotenuse points
+        // at the click coordinate. Rotate so the unbordered corner faces
+        // the popup, the bordered corner faces the map.
+        arrowEl.style[staticSide] = "-6px";
+        arrowEl.style.transform = ({
+          top:    "rotate(225deg)",
+          right:  "rotate(-45deg)",
+          bottom: "rotate(45deg)",
+          left:   "rotate(135deg)"
+        })[side];
       });
     }
   }
@@ -2785,6 +4697,11 @@ const TokenDialog = (() => {
 const Permalink = (() => {
   let timer;
   const MAX_LEN = 8192;
+  // Track the hash WE wrote so the hashchange listener below can
+  // distinguish a user-initiated back/forward from our own debounced
+  // history.replaceState() call.
+  let lastWritten = "";
+  let truncWarned = false;
 
   function scheduleUpdate() {
     clearTimeout(timer);
@@ -2806,16 +4723,21 @@ const Permalink = (() => {
         ...view.getCenter().map(n => Number(n.toFixed(2))),
         Number(view.getZoom().toFixed(2))
       ] : null,
-      // Base layer state: [opacityPct, visibleFlag].
-      b: [
-        Math.round(BaseLayer.getOpacity() * 100),
-        BaseLayer.isVisible() ? 1 : 0
-      ],
+      // Base layer state used to live in a dedicated `b` field. Post-
+      // refactor it's part of `l` like any other theme; the legacy `b`
+      // is still accepted by restore() for one-way back-compat.
       d3: document.getElementById("app").classList.contains("mode-3d") ? 1 : 0
     };
     const encoded = encodeURIComponent(JSON.stringify(state));
     const newHash = "#s=" + encoded;
-    if (newHash.length > MAX_LEN) return;
+    if (newHash.length > MAX_LEN) {
+      if (!truncWarned) {
+        truncWarned = true;
+        Toast.info("Permalink ist zu lang — Sitzung wird nicht vollständig im Link gespeichert. Reduziere die Layer-Anzahl oder nutze Export.");
+      }
+      return;
+    }
+    lastWritten = newHash;
     history.replaceState(null, "", newHash);
   }
 
@@ -2840,11 +4762,6 @@ const Permalink = (() => {
       view.setCenter([s.v[0], s.v[1]]);
       view.setZoom(s.v[2]);
     }
-    if (Array.isArray(s.b) && s.b.length === 2) {
-      const pct = Number(s.b[0]);
-      if (Number.isFinite(pct)) BaseLayer.setOpacity(Math.max(0, Math.min(100, pct)) / 100);
-      BaseLayer.setVisible(s.b[1] !== 0 && s.b[1] !== false);
-    }
     // Layer-tuple element 0 may be a full path (contains "/") or a legacy
     // bare key; switchCatalog handles both via findLayerByPath/-Key.
     const layers = Array.isArray(s.l)
@@ -2859,6 +4776,20 @@ const Permalink = (() => {
           return restore;
         })
       : [];
+    // Migrate legacy permalinks: the old `b: [pct, vis]` field stored
+    // base-layer state separately. New permalinks carry the base layer
+    // as a synthetic entry inside `l`. If the restore set doesn't yet
+    // contain it, prepend one — either from the legacy `b` or with the
+    // 30 % default.
+    if (!layers.some(l => l.path === BASE_LAYER_PATH)) {
+      let baseOpacity = BASE_DEFAULT_OPACITY, baseVisible = true;
+      if (Array.isArray(s.b) && s.b.length === 2) {
+        const pct = Number(s.b[0]);
+        if (Number.isFinite(pct)) baseOpacity = Math.max(0, Math.min(100, pct)) / 100;
+        baseVisible = s.b[1] !== 0 && s.b[1] !== false;
+      }
+      layers.unshift({ path: BASE_LAYER_PATH, opacity: baseOpacity, visible: baseVisible });
+    }
     await UI.switchCatalog(s.c, layers);
     if (s.d3) ThreeD.enable();
     return true;
@@ -2875,7 +4806,183 @@ const Permalink = (() => {
 
   view.on("change", scheduleUpdate);
 
+  // Re-apply state on back/forward navigation. Guard against our own
+  // history.replaceState() writes by comparing the new hash to the one we
+  // last wrote — only restore when the user navigated externally.
+  window.addEventListener("hashchange", () => {
+    if (location.hash === lastWritten) return;
+    restore().catch(() => {});
+  });
+
   return { scheduleUpdate, restore, copyToClipboard };
+})();
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Module: Geocoder (Photon default, BKG optional)
+───────────────────────────────────────────────────────────────────────── */
+const Geocoder = (() => {
+  const CONFIG_KEY = "gbl.geocoder";
+  const DSGVO_KEY = "gbl.geocoder.dsgvo-shown";
+  let config = loadConfig();
+  let abortCtrl = null;
+  let pinOverlay = null;
+  let pinElement = null;
+
+  function loadConfig() {
+    const dflt = { provider: "photon", uuid: "" };
+    try {
+      const raw = localStorage.getItem(CONFIG_KEY);
+      if (raw) return { ...dflt, ...JSON.parse(raw) };
+    } catch {}
+    return dflt;
+  }
+
+  function saveConfig(c) {
+    config = { ...config, ...c };
+    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); } catch {}
+  }
+
+  // Provider adapters. Each `query(text, ctrl)` returns
+  // [{ label, lon, lat, bbox? }] entries in WGS84, where bbox is a
+  // [minLon, minLat, maxLon, maxLat] tuple ready for transformExtent.
+  const PROVIDERS = {
+    photon: {
+      requiresUuid: false,
+      async query(q, ctrl) {
+        const u = new URL("https://photon.komoot.io/api/");
+        u.searchParams.set("q", q);
+        u.searchParams.set("lang", "de");
+        u.searchParams.set("limit", "8");
+        // Viewport bias improves locality of suggestions.
+        const c = view.getCenter();
+        if (c) {
+          const [lon, lat] = ol.proj.toLonLat(c);
+          u.searchParams.set("lat", lat.toFixed(4));
+          u.searchParams.set("lon", lon.toFixed(4));
+        }
+        const r = await fetch(u, { signal: ctrl?.signal });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        return (j.features || []).map(f => {
+          const p = f.properties || {};
+          const coords = f.geometry?.coordinates || [];
+          const labelParts = [p.name, p.housenumber, p.street, p.postcode, p.city, p.state, p.country]
+            .filter(x => typeof x === "string" && x.length);
+          // Photon's `extent` is [minLon, maxLat, maxLon, minLat] — convert.
+          const ext = Array.isArray(p.extent) && p.extent.length === 4
+            ? [p.extent[0], p.extent[3], p.extent[2], p.extent[1]]
+            : null;
+          return { label: labelParts.join(", ") || "?", lon: coords[0], lat: coords[1], bbox: ext };
+        });
+      }
+    },
+    bkg: {
+      requiresUuid: true,
+      async query(q, ctrl) {
+        if (!config.uuid) throw new Error("BKG-UUID nicht konfiguriert.");
+        // Defensive: UUID format ist xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        if (!/^[0-9a-f-]{36}$/i.test(config.uuid)) {
+          throw new Error("BKG-UUID-Format ungültig.");
+        }
+        const u = new URL("https://sg.geodatenzentrum.de/gdz_geokodierung__" + config.uuid + "/geosearch");
+        u.searchParams.set("query", q);
+        u.searchParams.set("count", "8");
+        u.searchParams.set("searchparam", "fuzzy");
+        const r = await fetch(u, { signal: ctrl?.signal });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        return (j.features || []).map(f => {
+          const p = f.properties || {};
+          const coords = f.geometry?.coordinates || [];
+          // BKG bbox is [minLon, minLat, maxLon, maxLat] already.
+          const bbox = Array.isArray(p.bbox) && p.bbox.length === 4 ? p.bbox : null;
+          return { label: p.text || "?", lon: coords[0], lat: coords[1], bbox };
+        });
+      }
+    }
+  };
+
+  async function search(text) {
+    if (!text || text.length < 3) return [];
+    if (abortCtrl) abortCtrl.abort();
+    abortCtrl = new AbortController();
+    const provider = PROVIDERS[config.provider] || PROVIDERS.photon;
+    // One-shot DSGVO toast on first Photon use per browser. The user has
+    // already accepted Photon as the configured provider; this is a
+    // reminder, not a consent dialog.
+    if (config.provider === "photon") {
+      try {
+        if (!localStorage.getItem(DSGVO_KEY)) {
+          Toast.info("Geo-Suche nutzt photon.komoot.io (DSGVO-Hinweis im Impressum erforderlich).");
+          localStorage.setItem(DSGVO_KEY, "1");
+        }
+      } catch {}
+    }
+    try {
+      return await provider.query(text, abortCtrl);
+    } catch (e) {
+      if (e.name === "AbortError") return [];
+      Toast.err("Geo-Suche: " + e.message);
+      return [];
+    }
+  }
+
+  function ensurePin() {
+    if (pinOverlay) return;
+    pinElement = document.createElement("div");
+    pinElement.className = "geo-pin";
+    pinElement.innerHTML = `
+      <svg viewBox="0 0 24 24" width="28" height="36">
+        <path d="M12 2C8 2 5 5 5 9c0 5 7 13 7 13s7-8 7-13c0-4-3-7-7-7z"
+              fill="var(--accent)" stroke="white" stroke-width="1.5"/>
+        <circle cx="12" cy="9" r="2.5" fill="white"/>
+      </svg>
+      <button class="geo-pin-close" type="button" aria-label="Pin entfernen" title="Pin entfernen">×</button>
+      <div class="geo-pin-tooltip"></div>
+    `;
+    pinElement.querySelector(".geo-pin-close").addEventListener("click", e => {
+      e.stopPropagation();
+      hidePin();
+    });
+    pinOverlay = new ol.Overlay({
+      element: pinElement,
+      positioning: "bottom-center",
+      offset: [0, 4],
+      stopEvent: true
+    });
+    map.addOverlay(pinOverlay);
+  }
+
+  function focusResult(result) {
+    if (!result) return;
+    if (Array.isArray(result.bbox) && result.bbox.length === 4 &&
+        result.bbox.every(Number.isFinite)) {
+      const ext = ol.proj.transformExtent(result.bbox, "EPSG:4326", "EPSG:3857");
+      view.fit(ext, { padding: [60, 60, 60, 60], maxZoom: 18, duration: 400 });
+    } else if (Number.isFinite(result.lon) && Number.isFinite(result.lat)) {
+      view.animate({
+        center: ol.proj.fromLonLat([result.lon, result.lat]),
+        zoom: 17,
+        duration: 400
+      });
+    }
+    showPin(result);
+  }
+
+  function showPin(result) {
+    if (!Number.isFinite(result.lon) || !Number.isFinite(result.lat)) return;
+    ensurePin();
+    pinElement.querySelector(".geo-pin-tooltip").textContent = result.label;
+    pinOverlay.setPosition(ol.proj.fromLonLat([result.lon, result.lat]));
+  }
+
+  function hidePin() {
+    if (pinOverlay) pinOverlay.setPosition(undefined);
+  }
+
+  function getConfig() { return { ...config }; }
+
+  return { search, focusResult, hidePin, getConfig, saveConfig };
 })();
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -3241,12 +5348,205 @@ document.getElementById("import-cancel").addEventListener("click", () => {
 document.getElementById("search-input").addEventListener("input", e => {
   UI.searchQuery = e.target.value;
   UI.renderTree();
+  renderLayerSearchStatus();
 });
+
+// Layer-search + Geo-search pane collapse — same pattern as #filter-pane
+// (chevron toggle, .collapsed class hides body, localStorage persists
+// state). `inert` is added to the hidden body so keyboard / screen-reader
+// users don't tab into invisible inputs. Layer-search shows the active
+// query as italicised status text when collapsed; geo-search has no
+// persistent state worth surfacing in the header.
+function renderLayerSearchStatus() {
+  const host = document.getElementById("layer-search-status");
+  if (!host) return;
+  const q = (UI.searchQuery || "").trim();
+  host.textContent = q ? `„${q.length > 22 ? q.slice(0, 22) + "…" : q}"` : "";
+}
+function wirePaneCollapse(paneId, btnId, bodyId, storageKey, onCollapse) {
+  const pane = document.getElementById(paneId);
+  const btn = document.getElementById(btnId);
+  const body = document.getElementById(bodyId);
+  if (!pane || !btn || !body) return;
+  function apply(collapsed) {
+    pane.classList.toggle("collapsed", collapsed);
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    if (collapsed) body.setAttribute("inert", "");
+    else body.removeAttribute("inert");
+    if (collapsed && typeof onCollapse === "function") onCollapse();
+  }
+  let initial = false;
+  try { initial = localStorage.getItem(storageKey) === "1"; } catch {}
+  apply(initial);
+  btn.addEventListener("click", () => {
+    const next = !pane.classList.contains("collapsed");
+    apply(next);
+    try { localStorage.setItem(storageKey, next ? "1" : "0"); } catch {}
+  });
+}
+wirePaneCollapse(
+  "layer-search-pane", "layer-search-toggle", "layer-search-body",
+  "gbl.layersearch.collapsed"
+);
+renderLayerSearchStatus();
+wirePaneCollapse(
+  "geo-pane", "geo-toggle", "geo-search-body",
+  "gbl.geosearch.collapsed",
+  () => {
+    // Close any open suggestion dropdown so it doesn't float orphaned
+    // beneath an absent input. Same trick as the input's blur handler.
+    const sug = document.getElementById("geo-suggest");
+    if (sug) sug.classList.remove("open");
+  }
+);
+
+/* Geo-search wiring — debounced lookup, dropdown render with keyboard
+   navigation, settings dialog for provider/UUID. */
+(function wireGeoSearch() {
+  const GEOCODER_DEBOUNCE_MS = 300;
+  const GEOCODER_MIN_LENGTH = 3;
+  const input = document.getElementById("geo-input");
+  const list = document.getElementById("geo-suggest");
+  let debounceTimer = null;
+  let currentResults = [];
+  let activeIndex = -1;
+
+  function closeDropdown() {
+    list.classList.remove("open");
+    activeIndex = -1;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  }
+
+  function renderItems(results) {
+    list.innerHTML = "";
+    currentResults = results;
+    activeIndex = -1;
+    if (!results.length) { closeDropdown(); return; }
+    results.forEach((r, i) => {
+      const li = document.createElement("li");
+      li.id = "geo-opt-" + i;
+      li.className = "geo-suggest-item";
+      li.setAttribute("role", "option");
+      li.dataset.index = i;
+      li.textContent = r.label;
+      li.addEventListener("click", () => {
+        Geocoder.focusResult(r);
+        input.value = r.label;
+        closeDropdown();
+      });
+      list.appendChild(li);
+    });
+    list.classList.add("open");
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  function setActive(i) {
+    const items = list.querySelectorAll(".geo-suggest-item");
+    items.forEach(el => el.removeAttribute("aria-selected"));
+    if (i < 0 || i >= items.length) {
+      activeIndex = -1;
+      input.removeAttribute("aria-activedescendant");
+      return;
+    }
+    activeIndex = i;
+    items[i].setAttribute("aria-selected", "true");
+    items[i].scrollIntoView({ block: "nearest" });
+    input.setAttribute("aria-activedescendant", items[i].id);
+  }
+
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    const q = input.value.trim();
+    if (q.length < GEOCODER_MIN_LENGTH) { closeDropdown(); return; }
+    debounceTimer = setTimeout(async () => {
+      const results = await Geocoder.search(q);
+      renderItems(results);
+    }, GEOCODER_DEBOUNCE_MS);
+  });
+
+  input.addEventListener("keydown", e => {
+    if (!list.classList.contains("open")) {
+      if (e.key === "Enter" && input.value.trim().length >= GEOCODER_MIN_LENGTH) {
+        // Force a search on Enter even without debounce
+        clearTimeout(debounceTimer);
+        Geocoder.search(input.value.trim()).then(renderItems);
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((activeIndex + 1) % currentResults.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(activeIndex <= 0 ? currentResults.length - 1 : activeIndex - 1);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const pick = activeIndex >= 0 ? currentResults[activeIndex] : currentResults[0];
+      if (pick) {
+        Geocoder.focusResult(pick);
+        input.value = pick.label;
+        closeDropdown();
+      }
+    } else if (e.key === "Escape") {
+      closeDropdown();
+    }
+  });
+
+  // Click outside closes the dropdown.
+  document.addEventListener("click", e => {
+    if (!list.contains(e.target) && e.target !== input) closeDropdown();
+  });
+
+  // Settings dialog
+  const dlg = document.getElementById("geo-settings-dlg");
+  const provSel = document.getElementById("geo-provider");
+  const uuidIn = document.getElementById("geo-uuid");
+  const uuidRow = document.getElementById("geo-uuid-row");
+
+  function syncUuidRow() {
+    uuidRow.style.display = provSel.value === "bkg" ? "" : "none";
+  }
+  provSel.addEventListener("change", syncUuidRow);
+
+  document.getElementById("geo-settings-btn").addEventListener("click", () => {
+    const cfg = Geocoder.getConfig();
+    provSel.value = cfg.provider;
+    uuidIn.value = cfg.uuid;
+    syncUuidRow();
+    if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
+  });
+  document.getElementById("geo-settings-cancel").addEventListener("click", () => dlg.close());
+  document.getElementById("geo-settings-save").addEventListener("click", () => {
+    const provider = provSel.value;
+    const uuid = uuidIn.value.trim();
+    if (provider === "bkg" && !/^[0-9a-f-]{36}$/i.test(uuid)) {
+      Toast.err("BKG-UUID-Format ungültig (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).");
+      return;
+    }
+    Geocoder.saveConfig({ provider, uuid });
+    Toast.info("Geo-Suche-Einstellungen gespeichert.");
+    dlg.close();
+  });
+  trapFocus(dlg);
+})();
+
+// Tree expand/collapse-all. Touches both country-level groups and any
+// nested theme-groups in one sweep. aria-expanded drives the CSS rule
+// that hides/shows the child <ul>.
+function setAllTreeExpanded(expanded) {
+  document.querySelectorAll('#tree li.group').forEach(li => {
+    li.setAttribute("aria-expanded", String(expanded));
+  });
+}
+document.getElementById("tree-expand-all").addEventListener("click", () => setAllTreeExpanded(true));
+document.getElementById("tree-collapse-all").addEventListener("click", () => setAllTreeExpanded(false));
 
 document.querySelectorAll('#filter-pane input[name="scope"]').forEach(r => {
   r.addEventListener("change", () => {
     UI.scopeAll = document.querySelector('#filter-pane input[name="scope"]:checked').value === "all";
     UI.renderTree();
+    renderFilterStatus();
   });
 });
 document.querySelectorAll('#filter-pane .type-filter input[type="checkbox"]').forEach(cb => {
@@ -3255,19 +5555,174 @@ document.querySelectorAll('#filter-pane .type-filter input[type="checkbox"]').fo
     document.querySelectorAll('#filter-pane .type-filter input[type="checkbox"]:checked')
       .forEach(c => UI.filterTypes.add(c.dataset.type));
     UI.renderTree();
+    renderFilterStatus();
   });
 });
 
+// Filter-pane collapse: same .collapsed pattern as #active-pane. Status
+// row in the header (#filter-status) gets repopulated whenever filters
+// change or the pane is toggled so the user always sees what's active
+// without expanding the body. State persists per browser.
+const FILTER_MINI = {
+  ogc_wms: "WMS",
+  ogc_wmts: "WMTS",
+  ogc_wfs: "WFS",
+  ogc_api_features: "OAPI",
+  ogc_vectorTiles: "VT",
+  ogc_wcs: "WCS",
+  web: "URL"
+};
+function renderFilterStatus() {
+  const host = document.getElementById("filter-status");
+  if (!host) return;
+  host.innerHTML = "";
+  // Sidebar at 340px: ~4-5 mini-chips fit before truncation looks ugly.
+  // Beyond that, collapse the remainder into a "+N" indicator.
+  const MAX = 5;
+  const active = SUPPORTED_LAYER_TYPES.filter(t => UI.filterTypes.has(t));
+  const all = ["ogc_wcs", "web"].filter(t => UI.filterTypes.has(t));
+  const list = [...active, ...all];
+  const shown = list.slice(0, MAX);
+  for (const t of shown) {
+    const chip = document.createElement("span");
+    chip.className = "mini-chip svc-tag";
+    chip.dataset.type = t;
+    chip.textContent = FILTER_MINI[t] || t;
+    host.appendChild(chip);
+  }
+  if (list.length > MAX) {
+    const more = document.createElement("span");
+    more.className = "more";
+    more.textContent = "+" + (list.length - MAX);
+    host.appendChild(more);
+  }
+  if (UI.scopeAll) {
+    const scope = document.createElement("span");
+    scope.className = "scope-mini";
+    scope.title = "Alle Kataloge";
+    scope.textContent = "•Alle";
+    host.appendChild(scope);
+  }
+}
+(function wireFilterPaneCollapse() {
+  const pane = document.getElementById("filter-pane");
+  const btn = document.getElementById("filter-toggle");
+  const KEY = "gbl.filterpane.collapsed";
+  function apply(collapsed) {
+    pane.classList.toggle("collapsed", collapsed);
+    btn.setAttribute("aria-expanded", String(!collapsed));
+  }
+  // Restore prior session state — default open (filters are central UX).
+  let initialCollapsed = false;
+  try { initialCollapsed = localStorage.getItem(KEY) === "1"; } catch {}
+  apply(initialCollapsed);
+  renderFilterStatus();
+  btn.addEventListener("click", () => {
+    const next = !pane.classList.contains("collapsed");
+    apply(next);
+    try { localStorage.setItem(KEY, next ? "1" : "0"); } catch {}
+    if (next) renderFilterStatus();
+  });
+})();
+
+// Sidebar toggle: on mobile slides the overlay in/out (.sidebar-open);
+// on desktop collapses the grid column to zero (.sidebar-collapsed)
+// and persists the choice in localStorage. Same button, two behaviours.
 document.getElementById("sidebar-toggle").addEventListener("click", () => {
-  document.getElementById("app").classList.toggle("sidebar-open");
+  const app = document.getElementById("app");
+  const isMobile = window.matchMedia("(max-width: 767px)").matches;
+  if (isMobile) {
+    app.classList.toggle("sidebar-open");
+  } else {
+    app.classList.toggle("sidebar-collapsed");
+    try {
+      localStorage.setItem("gbl.sidebar.collapsed",
+        app.classList.contains("sidebar-collapsed") ? "1" : "0");
+    } catch {}
+  }
 });
+// Restore desktop sidebar state from prior session
+try {
+  if (window.matchMedia("(min-width: 768px)").matches &&
+      localStorage.getItem("gbl.sidebar.collapsed") === "1") {
+    document.getElementById("app").classList.add("sidebar-collapsed");
+  }
+} catch {}
+
+// Identify can be toggled from either the sidebar Werkzeuge checkbox or
+// the map-toolbar button — keep them in sync so neither lies about the
+// state. setIdentifyEnabled is the single entry point; the two raw
+// controls only ever call it.
+function setIdentifyEnabled(on) {
+  Identify.setEnabled(on);
+  const cb = document.getElementById("identify-toggle");
+  if (cb) cb.checked = on;
+  const btn = document.getElementById("btn-identify-map");
+  if (btn) btn.setAttribute("aria-pressed", String(on));
+}
 document.getElementById("identify-toggle").addEventListener("change", e => {
-  Identify.setEnabled(e.target.checked);
+  setIdentifyEnabled(e.target.checked);
+});
+document.getElementById("btn-identify-map").addEventListener("click", () => {
+  const cb = document.getElementById("identify-toggle");
+  setIdentifyEnabled(!cb.checked);
+});
+
+// Map-toolbar: "Alle Themen entfernen" + "Ansicht zurücksetzen".
+// "Leeren" keeps the synthetic OSM base layer — only catalog-derived
+// themes are removed. "Ansicht" zooms to the union of active theme
+// extents, or to a Germany-default if the active list is base-only.
+const DE_DEFAULT_VIEW = { center: [1163288, 6649644], zoom: 6 };
+document.getElementById("btn-clear-themes").addEventListener("click", () => {
+  const removed = [...ActiveLayers.items]
+    .filter(i => i.layerPath !== BASE_LAYER_PATH)
+    .map(i => i.id);
+  if (removed.length === 0) {
+    Toast.info("Keine Themen-Layer aktiv.");
+    return;
+  }
+  for (const id of removed) ActiveLayers.remove(id);
+  Toast.info(removed.length === 1
+    ? "Themen-Layer entfernt."
+    : `${removed.length} Themen-Layer entfernt.`);
+});
+document.getElementById("btn-reset-view").addEventListener("click", async () => {
+  // Try to fit the union of active theme extents first; fall back to
+  // a Germany-wide view if nothing themed is loaded yet.
+  const themed = ActiveLayers.items.filter(i => i.layerPath !== BASE_LAYER_PATH);
+  if (themed.length > 0) {
+    const extents = await Promise.all(themed.map(getLayerExtent));
+    const union = extents
+      .filter(e => Array.isArray(e) && e.length === 4 && e.every(Number.isFinite))
+      .reduce((acc, e) => acc ? ol.extent.extend(acc, e) : e.slice(), null);
+    if (union) {
+      view.fit(union, { padding: [40, 40, 40, 40], duration: 250 });
+      return;
+    }
+  }
+  view.animate({ center: DE_DEFAULT_VIEW.center, zoom: DE_DEFAULT_VIEW.zoom, duration: 250 });
 });
 document.getElementById("active-handle").addEventListener("click", () => {
   const open = document.getElementById("app").classList.toggle("active-open");
   document.getElementById("active-handle").setAttribute("aria-expanded", String(open));
 });
+
+// Desktop active-pane collapse — separate from the mobile swipe handle.
+// Persisted in localStorage so a user who prefers a minimal floating
+// chip doesn't have to re-collapse on every page load.
+document.getElementById("active-collapse-toggle").addEventListener("click", () => {
+  const pane = document.getElementById("active-pane");
+  const collapsed = pane.classList.toggle("collapsed");
+  document.getElementById("active-collapse-toggle").setAttribute("aria-expanded", String(!collapsed));
+  try { localStorage.setItem("gbl.activepane.collapsed", collapsed ? "1" : "0"); } catch {}
+});
+try {
+  if (localStorage.getItem("gbl.activepane.collapsed") === "1") {
+    const pane = document.getElementById("active-pane");
+    pane.classList.add("collapsed");
+    document.getElementById("active-collapse-toggle").setAttribute("aria-expanded", "false");
+  }
+} catch {}
 
 /* ─────────────────────────────────────────────────────────────────────────
    Boot
@@ -3288,6 +5743,17 @@ document.getElementById("active-handle").addEventListener("click", () => {
   if (!restored) {
     const firstName = Catalogs.index[0]?.name;
     if (firstName) await UI.switchCatalog(firstName);
+    // Cold start: activate the OSM base layer at the default opacity so
+    // there's always something behind the catalogue themes. Permalink
+    // restoration handles its own base-layer activation. The checkbox
+    // toggle mirrors the pattern used by the permalink restore code.
+    const baseItem = await ActiveLayers.add(BASE_CATALOG_ID, BASE_LAYER_PATH, BASE_BRANCH.layers.osm, {
+      opacity: BASE_DEFAULT_OPACITY, visible: true, _skipAutoZoom: true
+    });
+    if (baseItem) {
+      const cb = findLayerCheckbox(BASE_LAYER_PATH);
+      if (cb) cb.checked = true;
+    }
   }
 })();
 </script>
