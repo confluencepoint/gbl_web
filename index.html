@@ -16,7 +16,7 @@
 -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-8KIyzxqAd8lmvY9xLT8IveZzi1DtWMadmyykW7a1+eQ=';
+  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-qCuLY5Z1O3sAeJiiOYmy9B2W1CDzJ+Sn/3sElgruqXo=';
   style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
   img-src 'self' data: blob: https: http:;
   font-src 'self';
@@ -1780,6 +1780,25 @@ if (window.top !== window.self) {
   };
   for (const [code, def] of Object.entries(defs)) proj4.defs(code, def);
   ol.proj.proj4.register(proj4);
+  // Per-projection world extent (in projection units). Required for OL's
+  // client-side raster reprojection in ImageWMS — without an extent, OL
+  // does not fire the GetMap request when source.projection differs
+  // from view.projection. Bounds are generous to cover each datum's
+  // typical area of use plus margin.
+  const extents = {
+    "EPSG:2056":  [2420000, 1030000, 2900000, 1350000],
+    "EPSG:21781": [420000, 30000, 900000, 350000],
+    "EPSG:25832": [-3000000, 2000000, 5000000, 9000000],
+    "EPSG:25833": [-3000000, 2000000, 5000000, 9000000],
+    "EPSG:31256": [-200000, -200000, 200000, 200000],
+    "EPSG:31287": [100000, 100000, 700000, 700000],
+    "EPSG:4258":  [-180, -90, 180, 90],
+    "EPSG:5514":  [-1000000, -1500000, 0, -500000],
+  };
+  for (const [code, extent] of Object.entries(extents)) {
+    const p = ol.proj.get(code);
+    if (p && typeof p.setExtent === "function") p.setExtent(extent);
+  }
 })();
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -2272,16 +2291,65 @@ const SourceFactory = {
     // InvalidCRS exception (1.3.0 uses CRS=, 1.1.1 uses SRS=).
     const wmsVersion = p.version || p.Version || p.VERSION;
     if (wmsVersion) params.VERSION = wmsVersion;
-    const source = new ol.source.ImageWMS({
-      url, params,
-      // null for CORS-broken servers: <img> loads no-cors, canvas
-      // taints, PNG export of this layer breaks, but the layer
-      // becomes visible — see CORS_BROKEN_HOSTS rationale.
-      crossOrigin: corsModeFor(url),
-      attributions: hostOf(url),
-      ratio: 1.5
-    });
-    installTokenImageLoader(source, url);
+    const layerName = layerDef.name || p.layers;
+    const buildSource = (forcedProjection) => {
+      const src = new ol.source.ImageWMS({
+        url, params,
+        // null for CORS-broken servers: <img> loads no-cors, canvas
+        // taints, PNG export of this layer breaks, but the layer
+        // becomes visible — see CORS_BROKEN_HOSTS rationale.
+        crossOrigin: corsModeFor(url),
+        attributions: hostOf(url),
+        ratio: 1.5,
+        ...(forcedProjection ? { projection: forcedProjection } : {})
+      });
+      installTokenImageLoader(src, url);
+      return src;
+    };
+    // Reactive GetMap-failure handling: ORB blocks ServiceException-XML
+    // responses opaquely so OL only sees a generic EncodingError —
+    // and valid_epsg sometimes lies (geodatenportal.sachsen-anhalt.de
+    // /gfds/* lists EPSG:3857 but the server rejects it). On first
+    // imageloaderror we rebuild the source in a national CRS from
+    // valid_epsg and let OL reproject client-side. If that also fails,
+    // or no fallback CRS is available, the user gets one toast.
+    // CORS_BROKEN_HOSTS cannot use this path: crossOrigin:null taints
+    // the canvas so OL skips reprojection silently, while
+    // crossOrigin:anonymous is blocked because the server omits
+    // Access-Control-Allow-Origin. For those hosts we surface the
+    // error directly with a CORS-specific hint.
+    let _wmsFallbackTried = false;
+    let _wmsErrToastShown = false;
+    const corsBroken = isCorsBrokenHost(url);
+    const attachErr = (src) => {
+      src.on("imageloaderror", () => {
+        if (!_wmsFallbackTried && !corsBroken) {
+          _wmsFallbackTried = true;
+          const fb = pickWmsFallbackCrs(layerDef.valid_epsg);
+          if (fb) {
+            const newSrc = buildSource(fb);
+            attachErr(newSrc);
+            layer.setSource(newSrc);
+            layer.set("_sourceProjection", fb);
+            // Re-bind status tracking to the new source — the listeners
+            // installed by attachStatusTracking() are wired to the old
+            // source and would otherwise leave the layer stuck on the
+            // red "error" dot even after the 25832 GetMap succeeds.
+            attachStatusTracking(layer);
+            Toast.info(layerName + ": Server lehnt EPSG:3857 ab — Anzeige in " + fb + ".");
+            return;
+          }
+        }
+        if (_wmsErrToastShown) return;
+        _wmsErrToastShown = true;
+        const hint = corsBroken
+          ? " (Server akzeptiert kein EPSG:3857 und sendet keinen CORS-Header — in diesem Viewer nicht darstellbar; QGIS verwenden)."
+          : " (Server-Antwort kein Bild — falsches CRS, Layer entfernt oder Dienst gestört).";
+        Toast.err(layerName + ": GetMap fehlgeschlagen" + hint);
+      });
+    };
+    const source = buildSource(null);
+    attachErr(source);
     const layer = new ol.layer.Image({ source });
     layer.set("_serviceUrl", url);
     layer.set("_type", "ogc_wms");
@@ -2770,6 +2838,26 @@ const CORS_BROKEN_HOSTS = new Map([
   ["www.geodatenportal.sachsen-anhalt.de", [10.5, 50.9, 13.2, 53.1]],
   ["geodatenportal.sachsen-anhalt.de",     [10.5, 50.9, 13.2, 53.1]]
 ]);
+
+// Pick a WMS source projection (≠ view CRS) for client-side reprojection.
+// Drives the reactive retry below: when the first GetMap fails, we
+// rebuild the source in this CRS and let OL reproject into EPSG:3857.
+// Used when a server rejects EPSG:3857 even though valid_epsg claims
+// support (geodatenportal.sachsen-anhalt.de/gfds/* lies about this).
+// Order prefers metric national CRS over geographic ones to keep
+// label rendering crisp.
+function pickWmsFallbackCrs(validEpsg) {
+  if (!Array.isArray(validEpsg) || validEpsg.length === 0) return null;
+  const known = new Set(validEpsg.map(s => String(s).toUpperCase().trim()));
+  const order = [
+    "EPSG:25832", "EPSG:25833",
+    "EPSG:31256", "EPSG:31287",
+    "EPSG:2056", "EPSG:21781",
+    "EPSG:5514",
+    "EPSG:4258", "EPSG:4326",
+  ];
+  return order.find(c => known.has(c)) || null;
+}
 
 function isCorsBrokenHost(serviceUrl) {
   try { return CORS_BROKEN_HOSTS.has(new URL(serviceUrl).hostname); }
