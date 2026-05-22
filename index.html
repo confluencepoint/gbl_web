@@ -4,16 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<meta http-equiv="Permissions-Policy" content="geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=()">
+<!--
+  CSP is enforced by both this <meta> tag (for static-hosting scenarios
+  where the server cannot set response headers, e.g. GitHub Pages) AND
+  by the dev-server's HTTP headers (serve.ps1). Two directives only work
+  as response headers and are therefore set in serve.ps1, NOT here:
+    • frame-ancestors  — browsers ignore it inside a meta tag
+    • Permissions-Policy / X-Frame-Options / X-Content-Type-Options
+  The JS frame-buster below also defends against clickjacking on hosts
+  that omit the response headers.
+-->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-yikW7lN3rVj+ZoG9mVSmNzf1Xyao2s2i0sqVqRchze4=';
+  script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'sha256-8KIyzxqAd8lmvY9xLT8IveZzi1DtWMadmyykW7a1+eQ=';
   style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
   img-src 'self' data: blob: https: http:;
   font-src 'self';
   connect-src https: http:;
   worker-src blob:;
-  frame-ancestors 'none';
   base-uri 'self';
   form-action 'none';
   object-src 'none';
@@ -27,7 +35,7 @@
   GEWÄHLT
     OpenLayers 10.3.1   — Pflicht: Karten-Engine.
     proj4js 2.12.1      — Pflicht: nationale CRS-Registrierung.
-    DOMPurify 3.2.4     — Pflicht: GetFeatureInfo-HTML sanitisieren.
+    DOMPurify 3.4.5     — Pflicht: GetFeatureInfo-HTML sanitisieren.
     Sortable.js 1.15.6  — Drag&Drop mit zuverlässigem Touch-Support.
                           HTML5-DnD auf Touch unzuverlässig; Mobile-Pflicht.
     Floating UI 1.6.13  — Popup-Positionierung. CSS Anchor Positioning
@@ -470,8 +478,11 @@ button { cursor: pointer; }
   width: 16px; height: 16px;
   transition: transform var(--t-fast) var(--ease);
 }
-.tree li.group[aria-expanded="false"] > .row .caret { transform: rotate(-90deg); }
-.tree li.group[aria-expanded="false"] > ul { display: none; }
+/* aria-expanded lives on the focusable .row (role="treeitem"), not on
+   the parent li — see _renderEntry. CSS reads the state off the row
+   directly for the caret, and via :has(>row) for the child ul. */
+.tree li.group > .row[aria-expanded="false"] .caret { transform: rotate(-90deg); }
+.tree li.group:has(> .row[aria-expanded="false"]) > ul { display: none; }
 
 .tree li.layer > label {
   position: relative;
@@ -605,7 +616,10 @@ button { cursor: pointer; }
   flex: none;
   transition: transform var(--t-fast) var(--ease);
 }
-#filter-pane.collapsed .pane-toggle .caret { transform: rotate(-90deg); }
+/* Caret rotation for every collapsible pane (filter, layer-search, geo).
+   The earlier rule scoped this to #filter-pane only, so the layer-search
+   and ortssuche panes didn't visually reflect their collapsed state. */
+.pane.collapsed .pane-toggle .caret { transform: rotate(-90deg); }
 
 /* Status row: hidden when filter-pane is open (body shows full controls),
    visible when collapsed. Mini-chip badges reuse .svc-tag's data-type
@@ -1437,6 +1451,15 @@ label.field input:focus {
   .btn { min-height: 44px; }
   .tree li.layer > label { min-height: 44px; }
 }
+
+/* Narrow viewports: six 44px touch targets + brand text don't fit on a
+   ~390px phone (Pixel/iPhone Mini). Drop the brand wordmark below the
+   compass icon. The icon remains as the visual identity, and the
+   topbar still announces itself to AT via the .brand aria-label. */
+@media (max-width: 480px) {
+  #topbar { gap: var(--sp-2); padding: 0 var(--sp-2); }
+  #topbar .brand > span { display: none; }
+}
 </style>
 </head>
 <body>
@@ -1486,6 +1509,10 @@ label.field input:focus {
     <div class="pane">
       <h2>Katalog</h2>
       <select id="catalog-select" aria-label="Katalog auswählen"></select>
+      <label class="tool-toggle" title="Aktive Layer beim Wechsel des Katalogs nicht entfernen">
+        <input type="checkbox" id="keep-layers-toggle">
+        Aktive Layer beim Katalogwechsel behalten
+      </label>
     </div>
     <div class="pane" id="layer-search-pane">
       <h2>
@@ -1712,8 +1739,8 @@ label.field input:focus {
 <script src="https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js"
         integrity="sha384-eCfO4pOi+VsP6z/nsQni5JF69AVBgkaI2kwPfFh+J64UMLNVDIBVvowHHM9Q62TF"
         crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"
-        integrity="sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu"
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.5/dist/purify.min.js"
+        integrity="sha384-7FXQySTrDscwsLx1i8RIqZM/JHoUVstx4CuL2b7tziI4Glhp3/3dm/j3qUTheVXE"
         crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"
         integrity="sha384-HZZ/fukV+9G8gwTNjN7zQDG0Sp7MsZy5DDN6VfY3Be7V9dvQpEpR2jF2HlyFUUjU"
@@ -1967,11 +1994,30 @@ function appendToken(url, token) {
   return url + sep + "token=" + encodeURIComponent(token);
 }
 
+// Same-origin comparator used by the auth-injection guard. Returns false
+// if either URL fails to parse — fail-closed: an unparsable URL must not
+// receive the Authorization header.
+function isSameOrigin(a, b) {
+  try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
+}
+
 // Fetch wrapper that injects Bearer auth when a token is registered
 // for the given service URL. Used by Identify/WFS/OAPIF code paths.
+// SECURITY: the Authorization header is only attached when requestUrl
+// shares the origin of serviceUrl. Server-supplied "next" links and
+// Mapbox style URLs may point to a different origin — sending the token
+// there would leak it to an unrelated host. Cross-origin requests still
+// go through (unauthenticated) so OAPIF paging and style loading keep
+// working for public follow-up resources. requestUrl is also re-checked
+// via isSafeUrl() to defend against catalogue-redirect SSRF.
 async function authedFetch(serviceUrl, requestUrl, opts = {}) {
+  if (!isSafeUrl(requestUrl)) {
+    throw new Error("Unsichere URL: " + requestUrl);
+  }
   const token = TokenStore.get(serviceUrl);
-  if (!token) return fetch(requestUrl, opts);
+  if (!token || !isSameOrigin(serviceUrl, requestUrl)) {
+    return fetch(requestUrl, opts);
+  }
   const headers = new Headers(opts.headers || {});
   headers.set("Authorization", "Bearer " + token);
   return fetch(requestUrl, { ...opts, headers, credentials: "omit" });
@@ -2010,7 +2056,10 @@ function installTokenTileLoader(source, serviceUrl) {
   source.setTileLoadFunction(async (tile, src) => {
     const img = tile.getImage();
     const token = TokenStore.get(serviceUrl);
-    if (!token) { img.src = src; return; }
+    // Same-origin guard: WMTS ResourceURL templates can advertise tiles
+    // on a different origin than the Capabilities document. Sending the
+    // Bearer there would leak it to an unrelated host.
+    if (!token || !isSameOrigin(serviceUrl, src)) { img.src = src; return; }
     try {
       const r = await fetch(src, {
         headers: { "Authorization": "Bearer " + token },
@@ -2044,7 +2093,8 @@ function installTokenImageLoader(source, serviceUrl) {
   source.setImageLoadFunction(async (image, src) => {
     const img = image.getImage();
     const token = TokenStore.get(serviceUrl);
-    if (!token) { img.src = src; return; }
+    // Same-origin guard — see installTokenTileLoader for the rationale.
+    if (!token || !isSameOrigin(serviceUrl, src)) { img.src = src; return; }
     try {
       const r = await fetch(src, {
         headers: { "Authorization": "Bearer " + token },
@@ -2075,7 +2125,10 @@ function installVectorTileTokenLoader(source, serviceUrl) {
     tile.setLoader(async (extent, resolution, projection) => {
       const token = TokenStore.get(serviceUrl);
       const init = { credentials: "omit" };
-      if (token) init.headers = { "Authorization": "Bearer " + token };
+      // Same-origin guard — see installTokenTileLoader for the rationale.
+      if (token && isSameOrigin(serviceUrl, src)) {
+        init.headers = { "Authorization": "Bearer " + token };
+      }
       try {
         const r = await fetch(src, init);
         if (r.status === 401 || r.status === 403) {
@@ -2612,8 +2665,15 @@ const SourceFactory = {
               ? data.links.find(l => l && l.rel === "next" && l.href)
               : null;
             if (!next) { serverHasMore = false; nextUrl = null; break; }
-            try { nextUrl = new URL(next.href, nextUrl).toString(); }
+            // Resolve and re-validate: a malicious OAPIF can hand out a
+            // next-link that points at javascript:, file:, an intranet
+            // host (SSRF) or a third-party origin (token leak — defended
+            // separately inside authedFetch via the same-origin guard).
+            let candidate;
+            try { candidate = new URL(next.href, nextUrl).toString(); }
             catch { nextUrl = null; break; }
+            if (!isSafeUrl(candidate)) { nextUrl = null; break; }
+            nextUrl = candidate;
             serverHasMore = true;
           }
         } catch {
@@ -3464,11 +3524,19 @@ const ActiveLayers = {
     const newItems = ids.map(id => this.byKey.get(id)).filter(Boolean);
     this.items = newItems;
     // Compose layers: base first, then bottom-to-top of map order.
-    // List top = map top => reverse for z-stack.
+    // List top = map top => reverse for z-stack. The OSM base layer
+    // entry shares its ol.layer.Tile instance with the synthetic-branch
+    // "_base/osm" entry — pushing both would duplicate it in
+    // map.getLayers() and double-render. Skip it in the iteration; the
+    // explicit push above keeps it pinned to the bottom regardless of
+    // where the user dragged it in the active list.
     const layers = map.getLayers();
     layers.clear();
     layers.push(baseLayer);
-    for (let i = newItems.length - 1; i >= 0; i--) layers.push(newItems[i].layer);
+    for (let i = newItems.length - 1; i >= 0; i--) {
+      if (newItems[i].layer === baseLayer) continue;
+      layers.push(newItems[i].layer);
+    }
     Permalink.scheduleUpdate();
   },
 
@@ -3570,6 +3638,27 @@ const FuzzySearch = {
 };
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Module: settings — small persisted boolean toggles
+───────────────────────────────────────────────────────────────────────── */
+const Settings = (() => {
+  // Persist on/off-only flags via localStorage. Stored values are "1"
+  // (true) and "0" (false). Default-false is intentional for every
+  // setting so a fresh browser sees the historical behaviour.
+  function read(key) {
+    try { return localStorage.getItem(key) === "1"; } catch { return false; }
+  }
+  function write(key, v) {
+    try { localStorage.setItem(key, v ? "1" : "0"); } catch {}
+  }
+  return { read, write };
+})();
+// Keep active layers across catalog switches. Default OFF — the
+// historical behaviour was to wipe the active list, and turning the
+// guard on changes the meaning of "switch catalog" enough that users
+// should opt in explicitly.
+const KEEP_LAYERS_ON_SWITCH_KEY = "gbl.keep-layers-on-catalog-switch";
+
+/* ─────────────────────────────────────────────────────────────────────────
    Module: UI — catalog dropdown, tree, active list
 ───────────────────────────────────────────────────────────────────────── */
 const UI = {
@@ -3591,6 +3680,13 @@ const UI = {
     sel.addEventListener("change", () => {
       this.switchCatalog(sel.value);
     });
+    const keepCb = document.getElementById("keep-layers-toggle");
+    if (keepCb) {
+      keepCb.checked = Settings.read(KEEP_LAYERS_ON_SWITCH_KEY);
+      keepCb.addEventListener("change", () => {
+        Settings.write(KEEP_LAYERS_ON_SWITCH_KEY, keepCb.checked);
+      });
+    }
   },
 
   async switchCatalog(name, restoredLayers /* optional [{path|key, opacity, visible}] */) {
@@ -3602,7 +3698,19 @@ const UI = {
         Toast.err(e.message);
         return;
       }
-      ActiveLayers.clear();
+      // When the "keep active layers" setting is on, do NOT drop the
+      // active-layer collection on catalog switch. Layers from other
+      // catalogues stay on the map and in the active pane (each item
+      // carries its own catalogId); the new catalogue's tree simply
+      // won't show them as checked, which is correct because the
+      // active-state lookup uses the fully-qualified id = catalogId +
+      // "::" + path. A restoredLayers payload (permalink/import) always
+      // means a fresh load — clear regardless of the user preference so
+      // we don't stack layers on top of a restore.
+      const keepActive = Settings.read(KEEP_LAYERS_ON_SWITCH_KEY);
+      if (!keepActive || (restoredLayers && restoredLayers.length)) {
+        ActiveLayers.clear();
+      }
       this.renderTree();
       // Ensure the active pane (incl. pinned base-layer row) renders even
       // when no themes are restored from the permalink. Otherwise the base
@@ -3745,23 +3853,26 @@ const UI = {
   // It mirrors the country-group structure so all the existing tree CSS
   // and keyboard handling apply unchanged.
   _renderSyntheticBranch(parent) {
+    // ARIA: role="treeitem" and aria-expanded sit on the focusable .row
+    // (not the parent li). Otherwise the focus point and the state-
+    // bearing element diverge — screen readers announce expanded/
+    // collapsed against the wrong node and tree position is muddled.
     const li = document.createElement("li");
     li.className = "group synthetic-branch";
-    li.setAttribute("role", "treeitem");
-    li.setAttribute("aria-expanded", "true");
 
     const row = document.createElement("div");
     row.className = "row";
     row.tabIndex = 0;
-    row.setAttribute("role", "button");
+    row.setAttribute("role", "treeitem");
+    row.setAttribute("aria-expanded", "true");
     row.innerHTML = `
       <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span></span>
     `;
     row.querySelector("span").textContent = BASE_BRANCH.countryLabel;
     row.addEventListener("click", () => {
-      const expanded = li.getAttribute("aria-expanded") === "true";
-      li.setAttribute("aria-expanded", String(!expanded));
+      const expanded = row.getAttribute("aria-expanded") === "true";
+      row.setAttribute("aria-expanded", String(!expanded));
     });
     row.addEventListener("keydown", e => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); row.click(); }
@@ -3805,20 +3916,19 @@ const UI = {
 
       const li = document.createElement("li");
       li.className = "group";
-      li.setAttribute("role", "treeitem");
-      li.setAttribute("aria-expanded", topLevel ? "true" : "false");
       const row = document.createElement("div");
       row.className = "row";
       row.tabIndex = 0;
-      row.setAttribute("role", "button");
+      row.setAttribute("role", "treeitem");
+      row.setAttribute("aria-expanded", topLevel ? "true" : "false");
       row.innerHTML = `
         <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span></span>
       `;
       row.querySelector("span").textContent = country.menu || countryKey;
       row.addEventListener("click", () => {
-        const expanded = li.getAttribute("aria-expanded") === "true";
-        li.setAttribute("aria-expanded", String(!expanded));
+        const expanded = row.getAttribute("aria-expanded") === "true";
+        row.setAttribute("aria-expanded", String(!expanded));
       });
       row.addEventListener("keydown", e => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); row.click(); }
@@ -3840,12 +3950,11 @@ const UI = {
       // wrap in catalog top-level group
       const catLi = document.createElement("li");
       catLi.className = "group catalog-group";
-      catLi.setAttribute("role", "treeitem");
-      catLi.setAttribute("aria-expanded", "false");
       const row = document.createElement("div");
       row.className = "row";
       row.tabIndex = 0;
-      row.setAttribute("role", "button");
+      row.setAttribute("role", "treeitem");
+      row.setAttribute("aria-expanded", "false");
       row.style.fontWeight = "600";
       row.innerHTML = `
         <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -3853,8 +3962,8 @@ const UI = {
       `;
       row.querySelector("span").textContent = catalogTitle;
       row.addEventListener("click", () => {
-        const ex = catLi.getAttribute("aria-expanded") === "true";
-        catLi.setAttribute("aria-expanded", String(!ex));
+        const ex = row.getAttribute("aria-expanded") === "true";
+        row.setAttribute("aria-expanded", String(!ex));
       });
       catLi.appendChild(row);
       const ul = document.createElement("ul");
@@ -3873,19 +3982,19 @@ const UI = {
     if (entry.kind === "group") {
       const li = document.createElement("li");
       li.className = "group";
-      li.setAttribute("role", "treeitem");
-      li.setAttribute("aria-expanded", "false");
       const row = document.createElement("div");
       row.className = "row";
       row.tabIndex = 0;
+      row.setAttribute("role", "treeitem");
+      row.setAttribute("aria-expanded", "false");
       row.innerHTML = `
         <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span></span>
       `;
       row.querySelector("span").textContent = entry.def.name || entry.key;
       row.addEventListener("click", () => {
-        const expanded = li.getAttribute("aria-expanded") === "true";
-        li.setAttribute("aria-expanded", String(!expanded));
+        const expanded = row.getAttribute("aria-expanded") === "true";
+        row.setAttribute("aria-expanded", String(!expanded));
       });
       li.appendChild(row);
       const ul = document.createElement("ul");
@@ -3909,9 +4018,9 @@ const UI = {
     const id = catalogId + "::" + path;
     const li = document.createElement("li");
     li.className = "layer";
-    li.setAttribute("role", "treeitem");
     li.dataset.layerId = id;
     li.dataset.layerPath = path;
+    // role="treeitem" is set on <label> below — the focusable element.
 
     // Synthetic base layer is always supported + always safe — it has no
     // URI of its own (the source is constructed from ol.source.OSM
@@ -3932,6 +4041,7 @@ const UI = {
     if (insecure) li.classList.add("insecure");
 
     const label = document.createElement("label");
+    label.setAttribute("role", "treeitem");
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.dataset.layerPath = path;
@@ -4822,7 +4932,12 @@ const Permalink = (() => {
 ───────────────────────────────────────────────────────────────────────── */
 const Geocoder = (() => {
   const CONFIG_KEY = "gbl.geocoder";
-  const DSGVO_KEY = "gbl.geocoder.dsgvo-shown";
+  // Photon is a third-party provider (komoot.io). Consent is required
+  // before the FIRST outgoing request; persisted so the dialog fires
+  // once per browser. New key on purpose — the old "dsgvo-shown" flag
+  // only recorded that the informational toast was displayed, never an
+  // affirmative opt-in, so existing users see the consent dialog once.
+  const CONSENT_KEY = "gbl.geocoder.photon-consent";
   let config = loadConfig();
   let abortCtrl = null;
   let pinOverlay = null;
@@ -4904,20 +5019,31 @@ const Geocoder = (() => {
 
   async function search(text) {
     if (!text || text.length < 3) return [];
+    const provider = PROVIDERS[config.provider] || PROVIDERS.photon;
+    // DSGVO opt-in: Photon is a third-party (komoot.io). Block the
+    // FIRST outgoing request until the user explicitly accepts that
+    // the typed query plus a viewport-bias coordinate leaves the
+    // browser. Persisted across sessions so the prompt fires at most
+    // once per browser. Cancel returns an empty result without firing
+    // any network request.
+    if (config.provider === "photon") {
+      let consent = null;
+      try { consent = localStorage.getItem(CONSENT_KEY); } catch {}
+      if (consent !== "1") {
+        const ok = window.confirm(
+          "Geo-Suche an photon.komoot.io (Drittanbieter) senden?\n\n" +
+          "Übertragen werden: Suchtext und ungefähre Kartenposition.\n" +
+          "Alternative: BKG-Geokodierung (UUID nötig) unter „Einstellungen“."
+        );
+        if (!ok) {
+          Toast.info("Geo-Suche abgebrochen. Provider wechseln unter „Einstellungen“.");
+          return [];
+        }
+        try { localStorage.setItem(CONSENT_KEY, "1"); } catch {}
+      }
+    }
     if (abortCtrl) abortCtrl.abort();
     abortCtrl = new AbortController();
-    const provider = PROVIDERS[config.provider] || PROVIDERS.photon;
-    // One-shot DSGVO toast on first Photon use per browser. The user has
-    // already accepted Photon as the configured provider; this is a
-    // reminder, not a consent dialog.
-    if (config.provider === "photon") {
-      try {
-        if (!localStorage.getItem(DSGVO_KEY)) {
-          Toast.info("Geo-Suche nutzt photon.komoot.io (DSGVO-Hinweis im Impressum erforderlich).");
-          localStorage.setItem(DSGVO_KEY, "1");
-        }
-      } catch {}
-    }
     try {
       return await provider.query(text, abortCtrl);
     } catch (e) {
@@ -5233,10 +5359,11 @@ function wireTreeKeyboard() {
       case "Home":      e.preventDefault(); setActive(items[0]); break;
       case "End":       e.preventDefault(); setActive(items[items.length - 1]); break;
       case "ArrowRight":
+        // aria-expanded now lives on the focusable .row (cur), not the li.
         if (li.classList.contains("group")) {
           e.preventDefault();
-          if (li.getAttribute("aria-expanded") === "false") {
-            li.setAttribute("aria-expanded", "true");
+          if (cur.getAttribute("aria-expanded") === "false") {
+            cur.setAttribute("aria-expanded", "true");
           } else {
             // move into first child
             const next = items[idx + 1];
@@ -5246,8 +5373,8 @@ function wireTreeKeyboard() {
         break;
       case "ArrowLeft":
         e.preventDefault();
-        if (li.classList.contains("group") && li.getAttribute("aria-expanded") === "true") {
-          li.setAttribute("aria-expanded", "false");
+        if (li.classList.contains("group") && cur.getAttribute("aria-expanded") === "true") {
+          cur.setAttribute("aria-expanded", "false");
         } else {
           // move to parent group row
           const parentLi = li.parentElement?.closest("li.group");
@@ -5375,8 +5502,17 @@ function wirePaneCollapse(paneId, btnId, bodyId, storageKey, onCollapse) {
     else body.removeAttribute("inert");
     if (collapsed && typeof onCollapse === "function") onCollapse();
   }
-  let initial = false;
-  try { initial = localStorage.getItem(storageKey) === "1"; } catch {}
+  // Default: collapsed. The sidebar shows three secondary search/filter
+  // panes plus the catalogue selector and the active-layer list — open
+  // by default they push the active list below the fold. Existing users
+  // who explicitly expanded a pane keep their state via localStorage
+  // ("0" = expanded); only the absence of an entry triggers the new
+  // default.
+  let initial = true;
+  try {
+    const v = localStorage.getItem(storageKey);
+    if (v === "0" || v === "1") initial = v === "1";
+  } catch {}
   apply(initial);
   btn.addEventListener("click", () => {
     const next = !pane.classList.contains("collapsed");
@@ -5532,11 +5668,12 @@ wirePaneCollapse(
 })();
 
 // Tree expand/collapse-all. Touches both country-level groups and any
-// nested theme-groups in one sweep. aria-expanded drives the CSS rule
-// that hides/shows the child <ul>.
+// nested theme-groups in one sweep. aria-expanded lives on the
+// focusable .row inside each group (see ARIA fix in _renderEntry); CSS
+// reads it via :has() to hide/show the child <ul>.
 function setAllTreeExpanded(expanded) {
-  document.querySelectorAll('#tree li.group').forEach(li => {
-    li.setAttribute("aria-expanded", String(expanded));
+  document.querySelectorAll('#tree li.group > .row').forEach(row => {
+    row.setAttribute("aria-expanded", String(expanded));
   });
 }
 document.getElementById("tree-expand-all").addEventListener("click", () => setAllTreeExpanded(true));
@@ -5612,9 +5749,14 @@ function renderFilterStatus() {
     pane.classList.toggle("collapsed", collapsed);
     btn.setAttribute("aria-expanded", String(!collapsed));
   }
-  // Restore prior session state — default open (filters are central UX).
-  let initialCollapsed = false;
-  try { initialCollapsed = localStorage.getItem(KEY) === "1"; } catch {}
+  // Default: collapsed (sidebar density — see wirePaneCollapse for the
+  // same default applied to layer-search and geo-search). Existing
+  // explicit state from localStorage overrides the default.
+  let initialCollapsed = true;
+  try {
+    const v = localStorage.getItem(KEY);
+    if (v === "0" || v === "1") initialCollapsed = v === "1";
+  } catch {}
   apply(initialCollapsed);
   renderFilterStatus();
   btn.addEventListener("click", () => {
